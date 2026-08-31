@@ -1,2 +1,12 @@
 *.riscv
 *.dump
+
+# Copied from the riscv-tests submodule by the Makefile, not checked in --
+# there should be one copy of that code in the tree.  syscalls.c is tracked
+# because it is patched.
+crt.S
+util.h
+encoding.h
+link.ld
+rsort.c
+dataset1.h
