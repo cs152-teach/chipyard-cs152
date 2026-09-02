@@ -77,32 +77,45 @@ void setStats(int enable)
   if (enable) {
     /* Flush first so the region starts from a known cache state -- without it
        the measurement inherits whatever the setup code left behind.  The flush
-       is asynchronous, so touch cacheable memory to wait for the walk. */
+       is asynchronous, so touch cacheable memory to wait for the walk.  Do NOT
+       fold these into one write: the walk's writebacks would land in the
+       just-zeroed counter. */
     cs152_ctr_wr(CS152_CTR_CONTROL, CS152_CTL_FLUSH);
     (void)cs152_flush_scratch;
-    cs152_ctr_wr(CS152_CTR_CONTROL, CS152_CTL_ZERO);
+    cs152_ctr_wr(CS152_CTR_CONTROL, CS152_CTL_ZERO);   /* zero, and start */
     return;
   }
 
-  /* Read every counter into a register before storing or printing anything.
-     A store here is an ordinary cached access and would be counted, landing
-     between the reads and breaking hits + misses == loads + stores.  No start
-     snapshot is needed: the counters were zeroed above. */
-  unsigned int cyc = cs152_ctr_rd(CS152_CTR_CYCLES);
-  unsigned int ld  = cs152_ctr_rd(CS152_CTR_LOADS);
-  unsigned int st  = cs152_ctr_rd(CS152_CTR_STORES);
-  unsigned int hi  = cs152_ctr_rd(CS152_CTR_HITS);
-  unsigned int mi  = cs152_ctr_rd(CS152_CTR_MISSES);
-  unsigned int wb  = cs152_ctr_rd(CS152_CTR_WRITEBACKS);
-  unsigned int acc = hi + mi;
+  /* Freeze the counters before reading any of them.  This is an MMIO store on
+     the counter port, so the cache never sees it and it is not counted.  Once
+     frozen, every counter describes the same instant and it no longer matters
+     where the compiler schedules its register spills -- which is why the reads
+     below can be interleaved with the printfs instead of hoisted above them. */
+  cs152_ctr_wr(CS152_CTR_CONTROL, CS152_CTL_STOP);
+
+  unsigned int magic = cs152_ctr_rd(CS152_CTR_MAGIC);
+  if (magic != CS152_CTR_MAGIC_VALUE) {
+    /* Expected under spike, which has no counter hardware; a real problem on
+       the simulator, where it means the two base addresses disagree. */
+    printf("CS152: no counter block at 0x%x -- no counters for this run.\n",
+           (unsigned int)CS152_CTR_BASE);
+    printf("       Expected under spike.  On the simulator it means\n"
+           "       CS152_CTR_BASE (cs152_counters.h) and CS152CounterBase\n"
+           "       (CS152Params.scala) disagree.\n");
+    return;
+  }
+
+  unsigned int hi   = cs152_ctr_rd(CS152_CTR_HITS);
+  unsigned int mi   = cs152_ctr_rd(CS152_CTR_MISSES);
+  unsigned int acc  = hi + mi;
 
   printf("=== CS152 L1D counters (region of interest, D-side only) ===\n");
-  printf("  cycles      : %d\n", cyc);
-  printf("  loads       : %d\n", ld);
-  printf("  stores      : %d\n", st);
+  printf("  cycles      : %d\n", cs152_ctr_rd(CS152_CTR_CYCLES));
+  printf("  loads       : %d\n", cs152_ctr_rd(CS152_CTR_LOADS));
+  printf("  stores      : %d\n", cs152_ctr_rd(CS152_CTR_STORES));
   printf("  hits        : %d\n", hi);
   printf("  misses      : %d\n", mi);
-  printf("  writebacks  : %d\n", wb);
+  printf("  writebacks  : %d\n", cs152_ctr_rd(CS152_CTR_WRITEBACKS));
   if (acc)
     printf("  miss rate   : %d.%02d %%\n", mi * 100 / acc,
            (unsigned int)((unsigned long long)mi * 10000 / acc) % 100);
@@ -171,6 +184,19 @@ void _init(int cid, int nc)
      setStats() now reads the L1D MMIO block instead, and this loop printed 16
      lines of zeros.  Removed -- the region-of-interest block that setStats(0)
      prints is the real output. */
+
+  /* CS152: report the verdict ourselves.  The test harness does print one, but
+     only under +verbose -- which run-binary-fast deliberately omits -- and it
+     writes to stderr, which the run rule does not capture.  So the harness
+     verdict reaches neither the log nor, usually, the terminal.  Printing here
+     puts it on stdout, directly below the counter block, which makes a saved
+     log self-certifying: it carries both the geometry it ran and whether the
+     result was right.  main() returns verify()'s value, which is 0 on success
+     and otherwise the 1-based position of the first wrong element. */
+  if (ret == 0)
+    printf("*** PASSED ***\n");
+  else
+    printf("*** FAILED *** (first wrong element: %d)\n", ret);
 
   exit(ret);
 }

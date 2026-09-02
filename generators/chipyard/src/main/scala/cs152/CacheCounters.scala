@@ -3,9 +3,20 @@
 //--------------------------------------------------------------------------
 //   0x00 cycles   0x04 loads   0x08 stores   0x0c hits
 //   0x10 misses   0x14 writebacks            0x18 instret (not implemented, 0)
+//   0x1c control  -- write-only, see below
 //   0x20 snoop accesses         0x24 snoop hits
-//   0x1c control  -- bit 0 zeroes every counter, bit 1 flushes (writeback +
-//                    invalidate), bit 2 cleans (writeback, lines stay resident)
+//   0x28 magic    -- 0xC5152001; lets software confirm it is talking to this
+//                    block at all, so a base-address mismatch between
+//                    cs152_counters.h and CS152CounterBase is diagnosed
+//                    instead of silently reading nothing
+//
+//   control (0x1c) write bits:
+//     bit 0   zero every counter AND resume counting  (starts a region)
+//     bit 1   flush  -- write back dirty lines, then invalidate
+//     bit 2   clean  -- write back dirty lines, lines stay resident
+//     bit 3   stop counting                          (ends a region)
+//
+// If bits 0 and 3 are set in the same write, bit 0 wins and counting resumes.
 
 package cs152
 
@@ -13,6 +24,12 @@ import chisel3._
 import chisel3.util._
 import sodor.common.{MemPortIo, SodorCoreParams}
 import sodor.common.Constants._
+
+object CacheCounters {
+  /* Also defined as CS152_CTR_MAGIC_VALUE in lab/runtime/cs152_counters.h.
+     Change both together. */
+  val magic = "hC5152001"
+}
 
 class CacheCounters(implicit conf: SodorCoreParams) extends Module {
   val io = IO(new Bundle {
@@ -30,38 +47,51 @@ class CacheCounters(implicit conf: SodorCoreParams) extends Module {
   val writebacks = RegInit(0.U(32.W))
   val snoopAcc   = RegInit(0.U(32.W))
   val snoopHits  = RegInit(0.U(32.W))
+  val enabled    = RegInit(true.B)
 
-  cycles := cycles + 1.U
-  when (io.stats.load)      { loads      := loads      + 1.U }
-  when (io.stats.store)     { stores     := stores     + 1.U }
-  when (io.stats.hit)       { hits       := hits       + 1.U }
-  when (io.stats.miss)      { misses     := misses     + 1.U }
-  when (io.stats.writeback)   { writebacks := writebacks + 1.U }
-  when (io.stats.snoopAccess) { snoopAcc   := snoopAcc   + 1.U }
-  when (io.stats.snoopHit)    { snoopHits  := snoopHits  + 1.U }
+  when (enabled) {
+    cycles := cycles + 1.U
+    when (io.stats.load)        { loads      := loads      + 1.U }
+    when (io.stats.store)       { stores     := stores     + 1.U }
+    when (io.stats.hit)         { hits       := hits       + 1.U }
+    when (io.stats.miss)        { misses     := misses     + 1.U }
+    when (io.stats.writeback)   { writebacks := writebacks + 1.U }
+    when (io.stats.snoopAccess) { snoopAcc   := snoopAcc   + 1.U }
+    when (io.stats.snoopHit)    { snoopHits  := snoopHits  + 1.U }
+  }
 
   val sel = io.port.req.bits.addr(5, 2)
   io.port.req.ready      := true.B
   io.port.resp.valid     := io.port.req.valid
   io.port.resp.bits.data := MuxLookup(sel, 0.U)(Seq(
-    0.U -> cycles,
-    1.U -> loads,
-    2.U -> stores,
-    3.U -> hits,
-    4.U -> misses,
-    5.U -> writebacks,
-    6.U -> 0.U,              // instret: would need a core-side retire pulse
-    8.U -> snoopAcc,
-    9.U -> snoopHits
+     0.U -> cycles,
+     1.U -> loads,
+     2.U -> stores,
+     3.U -> hits,
+     4.U -> misses,
+     5.U -> writebacks,
+     6.U -> 0.U,              // instret: would need a core-side retire pulse
+     8.U -> snoopAcc,
+     9.U -> snoopHits,
+    10.U -> CacheCounters.magic.U(32.W)
   ))
 
-  // Control word (0x1c):  bit 0 = zero the counters,  bit 1 = flush the cache.
   val ctrlWrite = io.port.req.valid && io.port.req.bits.fcn === M_XWR && sel === 7.U
+
+  // Bit 3 first, so that bit 0 (below) wins if a write sets both.
+  when (ctrlWrite && io.port.req.bits.data(3)) { enabled := false.B }
+
   when (ctrlWrite && io.port.req.bits.data(0)) {
     cycles := 0.U; loads := 0.U; stores := 0.U
     hits := 0.U; misses := 0.U; writebacks := 0.U
     snoopAcc := 0.U; snoopHits := 0.U
+    enabled := true.B
   }
+
+  // NOTE (known issue): zeroing is combinational at the write cycle, but a
+  // flush walk runs for many cycles afterwards and its writebacks land in the
+  // just-zeroed counter.  Issue FLUSH, wait for it, then ZERO -- as setStats()
+  // does -- rather than setting both bits in one write.
   io.flush := ctrlWrite && io.port.req.bits.data(1)
   io.clean := ctrlWrite && io.port.req.bits.data(2)
 }

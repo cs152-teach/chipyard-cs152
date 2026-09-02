@@ -56,20 +56,30 @@ object L1State {
 
 case object CS152CacheKey extends Field[CS152CacheParams](CS152CacheParams())
 
-/* Base of the counter MMIO window. */
-case object CS152CounterBase extends Field[BigInt](0x10000000L)
+/* Base of the counter MMIO window.
+   NOT 0x1000_0000: spike parks a byte-only ns16550 UART there, so a 32-bit
+   counter read under spike raises a load access fault and the program traps.
+   0x2000_0000 is free both here and in spike, which keeps spike usable as a
+   functional golden reference:
+     spike --isa=rv32i_zicsr -m0x20000000:0x1000,0x80000000:0x40000 prog.riscv
+   CS152_CTR_BASE in lab/runtime/cs152_counters.h must match this. */
+case object CS152CounterBase extends Field[BigInt](0x20000000L)
 
-/* The fragment students edit. */
+/* The fragment students edit.
+   writeBack and writeAllocate are deliberately NOT exposed here: only one of
+   the four combinations is implemented, so offering them would only let a
+   student pick a combination that fails during elaboration.  They remain in
+   CS152CacheParams for whenever the other policies get written. */
 class WithL1D(
   sets: Int = 64,
   ways: Int = 2,
   lineBytes: Int = 32,
   dramLat: Int = 20,
   hitLat: Int = 1,
-  writeBack: Boolean = true,
-  writeAllocate: Boolean = true,
   replacement: String = "lru"
 ) extends Config((site, here, up) => {
   case CS152CacheKey =>
-    CS152CacheParams(sets, ways, lineBytes, dramLat, hitLat, writeBack, writeAllocate, replacement)
+    CS152CacheParams(sets, ways, lineBytes, dramLat, hitLat,
+                     writeBack = true, writeAllocate = true,
+                     replacement = replacement)
 })

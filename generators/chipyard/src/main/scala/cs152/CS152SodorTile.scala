@@ -31,7 +31,7 @@ class CS152SodorInternalTile(range: AddressSet, coreCtor: SodorCoreFactory)
   val memory = Module(new AsyncScratchPadMemory(num_core_ports = 2))
 
   // MMIO perf counters address range
-  val counterRange = AddressSet(p(CS152CounterBase), 0xfff)
+  val counterRange = AddressSet(p(CS152CounterBase), 0x3f)
   // CS152Router decodes the counter window BEFORE the scratchpad, so an overlap
   // would silently steal 4 KiB of memory rather than fail.
   require(!range.overlaps(counterRange),
