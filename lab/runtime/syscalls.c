@@ -94,6 +94,11 @@ void setStats(int enable)
   cs152_ctr_wr(CS152_CTR_CONTROL, CS152_CTL_STOP);
 
   unsigned int magic = cs152_ctr_rd(CS152_CTR_MAGIC);
+  if (magic == CS152_CTR_MAGIC_MYSTERY) {
+    printf("=== CS152 L1D counters (mystery build: cycles only) ===\n");
+    printf("  cycles      : %d\n", cs152_ctr_rd(CS152_CTR_CYCLES));
+    return;
+  }
   if (magic != CS152_CTR_MAGIC_VALUE) {
     /* Expected under spike, which has no counter hardware; a real problem on
        the simulator, where it means the two base addresses disagree. */

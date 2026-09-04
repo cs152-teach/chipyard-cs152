@@ -29,9 +29,11 @@ object CacheCounters {
   /* Also defined as CS152_CTR_MAGIC_VALUE in lab/runtime/cs152_counters.h.
      Change both together. */
   val magic = "hC5152001"
+  /* A mystery build (open-ended 1) reports cycles only.*/
+  val mysteryMagic = "hC5152002"
 }
 
-class CacheCounters(implicit conf: SodorCoreParams) extends Module {
+class CacheCounters(mystery: Boolean = false)(implicit conf: SodorCoreParams) extends Module {
   val io = IO(new Bundle {
     val port  = Flipped(new MemPortIo(data_width = conf.xprlen))
     val stats = Input(new L1DStats)
@@ -60,20 +62,24 @@ class CacheCounters(implicit conf: SodorCoreParams) extends Module {
     when (io.stats.snoopHit)    { snoopHits  := snoopHits  + 1.U }
   }
 
+  /* Mysterious build: only expose cycles counter */
+  def vis(r: UInt): UInt = if (mystery) 0.U(32.W) else r
+
   val sel = io.port.req.bits.addr(5, 2)
   io.port.req.ready      := true.B
   io.port.resp.valid     := io.port.req.valid
   io.port.resp.bits.data := MuxLookup(sel, 0.U)(Seq(
      0.U -> cycles,
-     1.U -> loads,
-     2.U -> stores,
-     3.U -> hits,
-     4.U -> misses,
-     5.U -> writebacks,
+     1.U -> vis(loads),
+     2.U -> vis(stores),
+     3.U -> vis(hits),
+     4.U -> vis(misses),
+     5.U -> vis(writebacks),
      6.U -> 0.U,              // instret: would need a core-side retire pulse
-     8.U -> snoopAcc,
-     9.U -> snoopHits,
-    10.U -> CacheCounters.magic.U(32.W)
+     8.U -> vis(snoopAcc),
+     9.U -> vis(snoopHits),
+    10.U -> (if (mystery) CacheCounters.mysteryMagic.U(32.W)
+             else          CacheCounters.magic.U(32.W))
   ))
 
   val ctrlWrite = io.port.req.valid && io.port.req.bits.fcn === M_XWR && sel === 7.U

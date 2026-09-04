@@ -10,6 +10,7 @@ case class CS152CacheParams(
   lineBytes: Int = 32,
   dramLat: Int = 20,
   hitLat: Int = 1,
+  mystery: Boolean = false,
   // Not yet implemented -- present so the config surface matches the lab spec.
   writeBack: Boolean = true,
   writeAllocate: Boolean = true,
@@ -37,9 +38,12 @@ case class CS152CacheParams(
   require(tagBits > 0, s"CS152: l1d geometry leaves no tag bits (sets=$sets, lineBytes=$lineBytes)")
 
   def summary: String =
-    f"CS152 L1D: ${capacityBytes}%d B = $sets%d sets x $ways%d ways x $lineBytes%d B/line " +
-    f"(tag=$tagBits%d index=$indexBits%d offset=$offsetBits%d, repl=$replacement, " +
-    f"hit_lat=$hitLat%d dram_lat=$dramLat%d)"
+    if (mystery)
+      "CS152 L1D: MYSTERY BUILD -- geometry, latencies and policy withheld from this log"
+    else
+      f"CS152 L1D: ${capacityBytes}%d B = $sets%d sets x $ways%d ways x $lineBytes%d B/line " +
+      f"(tag=$tagBits%d index=$indexBits%d offset=$offsetBits%d, repl=$replacement, " +
+      f"hit_lat=$hitLat%d dram_lat=$dramLat%d)"
 }
 
 /* Per-line coherence state. */
@@ -76,10 +80,11 @@ class WithL1D(
   lineBytes: Int = 32,
   dramLat: Int = 20,
   hitLat: Int = 1,
-  replacement: String = "lru"
+  replacement: String = "lru",
+  mystery: Boolean = false
 ) extends Config((site, here, up) => {
   case CS152CacheKey =>
-    CS152CacheParams(sets, ways, lineBytes, dramLat, hitLat,
+    CS152CacheParams(sets, ways, lineBytes, dramLat, hitLat, mystery = mystery,
                      writeBack = true, writeAllocate = true,
                      replacement = replacement)
 })

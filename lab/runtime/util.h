@@ -5,6 +5,12 @@
 
 extern void setStats(int enable);
 
+
+int  printf(const char* fmt, ...);
+void exit(int code);
+void abort(void);
+void printstr(const char* s);
+
 #include <stdint.h>
 
 #define static_assert(cond) switch(0) { case 0: case !!(long)(cond): ; }

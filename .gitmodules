@@ -148,9 +148,6 @@
 [submodule "generators/rocket-chip-inclusive-cache"]
 	path = generators/rocket-chip-inclusive-cache
 	url = https://github.com/chipsalliance/rocket-chip-inclusive-cache.git
-[submodule "lab/open1/ccbench"]
-	path = lab/open1/ccbench
-	url = https://github.com/ucb-bar/ccbench.git
 [submodule "lab/open2/gapbs"]
 	path = lab/open2/gapbs
 	url = https://github.com/sbeamer/gapbs.git

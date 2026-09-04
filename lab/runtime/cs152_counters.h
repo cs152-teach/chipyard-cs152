@@ -18,12 +18,9 @@
 #define CS152_CTR_SNOOP_HIT  0x24
 #define CS152_CTR_MAGIC      0x28   /* reads CS152_CTR_MAGIC_VALUE */
 
-/* There is deliberately no way to read the cache configuration here.  2.OE.1
-   has students reverse-engineer the geometry, the latencies and the
-   replacement policy; none of them are exposed. */
-
 /* Also defined as CacheCounters.magic in CacheCounters.scala. */
 #define CS152_CTR_MAGIC_VALUE 0xC5152001u
+#define CS152_CTR_MAGIC_MYSTERY 0xC5152002u
 
 /* CS152_CTR_CONTROL write bits.  ZERO starts a region, STOP ends one. */
 #define CS152_CTL_ZERO   1u   /* zero every counter, and resume counting   */

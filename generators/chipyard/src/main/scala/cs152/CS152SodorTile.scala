@@ -49,7 +49,7 @@ class CS152SodorInternalTile(range: AddressSet, coreCtor: SodorCoreFactory)
   val drouter  = Module(new CS152Router(range, counterRange))
   val cache    = Module(new L1DCache(cfg))
   val fmem     = Module(new FixedLatencyMem(cfg))
-  val counters = Module(new CacheCounters)
+  val counters = Module(new CacheCounters(cfg.mystery))
 
   drouter.io.corePort   <> core.mem_ports(DPORT)
   drouter.io.masterPort <> io.master_port(DPORT)

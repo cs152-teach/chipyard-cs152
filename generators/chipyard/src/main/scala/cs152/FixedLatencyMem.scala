@@ -28,8 +28,7 @@ class FixedLatencyMem(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) ext
   })
 
   // Default comes from the Scala config, so the plain make flow needs no flags.
-  val dramLat = PlusArg("l1d_dram_lat", default = cfg.dramLat, width = 16,
-    docstring = "CS152: cycles to the first word of a DRAM burst")
+  val dramLat = cfg.dramLat.U(16.W)
 
   val sIdle :: sWait :: Nil = Enum(2)
   val state = RegInit(sIdle)

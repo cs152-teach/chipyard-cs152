@@ -69,7 +69,6 @@ include $(base_dir)/generators/ibex/ibex.mk
 include $(base_dir)/generators/tracegen/tracegen.mk
 include $(base_dir)/generators/nvdla/nvdla.mk
 include $(base_dir)/tools/torture.mk
-include $(base_dir)/cs152.mk
 
 #########################################################################################
 # Prerequisite lists

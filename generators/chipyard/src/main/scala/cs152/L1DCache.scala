@@ -56,8 +56,7 @@ class L1DCache(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Mo
   val dataAddrBits = log2Ceil(sets * ways * lineBytes)
 
   // Default comes from the Scala config, so the plain make flow needs no flags.
-  val hitLat = PlusArg("l1d_hit_lat", default = cfg.hitLat, width = 8,
-    docstring = "CS152: cycles from request to response on an L1D hit; 1 = same cycle")
+  val hitLat = cfg.hitLat.U(8.W)
 
   // ---------------- address decomposition ----------------
   def offOf(a: UInt): UInt = a(offsetBits - 1, 0)
