@@ -8,7 +8,7 @@
 #   cd $(CHIPYARD_ROOT)/sims/verilator
 #   make CONFIG=CS152Lab2Config run-binary-fast BINARY=path-to/rsort.riscv
 #
-# The bare-metal runtime -- crt.S, syscalls.c, softmul.c, link.ld and the
+# The bare-metal runtime -- crt.S, syscalls.c, link.ld and the
 # shared headers -- lives in ../runtime and is shared with the open-ended
 # problems.  See ../runtime/Makefile for its provenance.
 #

@@ -15,8 +15,8 @@
 #   encoding.h      <- env/            (a nested submodule of that repo)
 #
 # To re-sync them, fetch that submodule and copy the files above.  The
-# other three are ours: syscalls.c is upstream patched for the CS152 MMIO
-# counters, and softmul.c and cs152_counters.h are written for this lab.
+# other two are ours: syscalls.c is upstream patched for the CS152 MMIO
+# counters, and cs152_counters.h is written for this lab.
 ########################################################################
 
 RUNTIME_DIR = .
