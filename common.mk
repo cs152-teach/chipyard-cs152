@@ -265,6 +265,13 @@ $(SFC_MFC_TARGETS) &: $(TAPEOUT_CLASSPATH_TARGETS) $(FIRRTL_FILE) $(FINAL_ANNO_F
 	-mv $(SFC_SMEMS_CONF) $(MFC_SMEMS_CONF) 2> /dev/null
 	$(SED) -i 's/.*/& /' $(MFC_SMEMS_CONF) # need trailing space for SFC macrocompiler
 	touch $(MFC_BB_MODS_FILELIST) # if there are no BB's then the file might not be generated, instead always generate it
+	# Same story for the testbench seq-mem metadata: firtool only writes it when
+	# the TB actually has sequential memories, but it is a declared output of this
+	# grouped target.  Missing it makes make consider the group permanently
+	# incomplete, so EVERY invocation -- including every run-binary* -- re-enters
+	# this recipe.  Two concurrent runs of one CONFIG then race here and in
+	# verilator's PCH.  Always create it, like MFC_BB_MODS_FILELIST above.
+	mkdir -p $(dir $(MFC_MODEL_SMEMS_JSON)) && touch $(MFC_MODEL_SMEMS_JSON)
 # DOC include end: FirrtlCompiler
 
 $(TOP_MODS_FILELIST) $(MODEL_MODS_FILELIST) $(ALL_MODS_FILELIST) $(BB_MODS_FILELIST) $(MFC_MODEL_HRCHY_JSON_UNIQUIFIED) &: $(MFC_MODEL_HRCHY_JSON) $(MFC_TOP_HRCHY_JSON) $(MFC_FILELIST) $(MFC_BB_MODS_FILELIST)
