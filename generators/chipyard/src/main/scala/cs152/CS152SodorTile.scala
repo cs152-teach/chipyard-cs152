@@ -13,6 +13,7 @@ package cs152
 
 import chisel3._
 import chisel3.util._
+import chisel3.util.experimental.loadMemoryFromFileInline
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.AddressSet
 import sodor.common._
@@ -29,6 +30,13 @@ class CS152SodorInternalTile(range: AddressSet, coreCtor: SodorCoreFactory)
   val core   = Module(coreCtor.instantiate)
   core.io := DontCare
   val memory = Module(new AsyncScratchPadMemory(num_core_ports = 2))
+
+  // Optional $readmemh backdoor into the scratchpad, bypassing the fesvr/TSI
+  // load.
+  p(CS152PreloadHex).foreach { hex =>
+    loadMemoryFromFileInline(memory.async_data.mem, hex)
+    println(s"    CS152 scratchpad preload: $hex ($$readmemh, fesvr load bypassed)")
+  }
 
   // MMIO perf counters address range
   val counterRange = AddressSet(p(CS152CounterBase), 0x3f)

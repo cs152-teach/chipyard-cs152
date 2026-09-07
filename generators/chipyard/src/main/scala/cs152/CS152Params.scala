@@ -69,6 +69,17 @@ case object CS152CacheKey extends Field[CS152CacheParams](CS152CacheParams())
    CS152_CTR_BASE in lab/runtime/cs152_counters.h must match this. */
 case object CS152CounterBase extends Field[BigInt](0x20000000L)
 
+/* Path to a hex image to pre-load into the Sodor scratchpad with $readmemh,
+   or None for the normal fesvr/TSI load.
+ */
+case object CS152PreloadHex extends Field[Option[String]](None)
+
+/* Opt in to the pre-load.  Kept off the student-facing configs so their builds
+   stay bit-identical; see CS152Lab2ConfigPreload. */
+class WithScratchpadPreload(file: String = "preload.hex") extends Config((site, here, up) => {
+  case CS152PreloadHex => Some(file)
+})
+
 /* The fragment students edit.
    writeBack and writeAllocate are deliberately NOT exposed here: only one of
    the four combinations is implemented, so offering them would only let a

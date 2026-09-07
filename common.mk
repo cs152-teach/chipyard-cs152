@@ -265,12 +265,6 @@ $(SFC_MFC_TARGETS) &: $(TAPEOUT_CLASSPATH_TARGETS) $(FIRRTL_FILE) $(FINAL_ANNO_F
 	-mv $(SFC_SMEMS_CONF) $(MFC_SMEMS_CONF) 2> /dev/null
 	$(SED) -i 's/.*/& /' $(MFC_SMEMS_CONF) # need trailing space for SFC macrocompiler
 	touch $(MFC_BB_MODS_FILELIST) # if there are no BB's then the file might not be generated, instead always generate it
-	# Same story for the testbench seq-mem metadata: firtool only writes it when
-	# the TB actually has sequential memories, but it is a declared output of this
-	# grouped target.  Missing it makes make consider the group permanently
-	# incomplete, so EVERY invocation -- including every run-binary* -- re-enters
-	# this recipe.  Two concurrent runs of one CONFIG then race here and in
-	# verilator's PCH.  Always create it, like MFC_BB_MODS_FILELIST above.
 	mkdir -p $(dir $(MFC_MODEL_SMEMS_JSON)) && touch $(MFC_MODEL_SMEMS_JSON)
 # DOC include end: FirrtlCompiler
 
@@ -366,6 +360,33 @@ ifneq ($(LOADARCH),)
 get_loadarch_flag = +loadarch=$(subst mem.elf,loadarch,$(1))
 endif
 
+# CS152: the lab-2 configs pre-load the Sodor scratchpad with $readmemh, which
+# needs preload.hex in the simulator's working directory -- the $readmemh path is
+# a literal baked in at elaboration.
+CS152_PRELOAD_SCRIPT ?= $(base_dir)/scripts/cs152-preload.sh
+get_preload_dir = $(call get_sim_out_name,$(1)).preload
+ifneq ($(filter CS152Lab2%,$(CONFIG)),)
+ifneq ($(LOADMEM),)
+# cd below means every path on the command line must be absolute; $* comes from
+# BINARY, so fix it here rather than guarding each use.
+# "none" is a sentinel, not a path -- $(abspath none) would turn it into a real
+# path and break %.check-exists, so leave it alone.
+override BINARY := $(if $(filter none,$(BINARY)),none,$(abspath $(BINARY)))
+override BINARIES := $(foreach b,$(BINARIES),$(if $(filter none,$(b)),none,$(abspath $(b))))
+ifeq ($(LOADMEM),1)
+get_preload_elf = $(1)
+else
+get_preload_elf = $(abspath $(LOADMEM))
+endif
+# "none" is a supported BINARY sentinel (see %.check-exists), and LOADMEM now
+# defaults on, so the preload must step aside for it rather than fail the run.
+get_preload_cmd = { [ "$(call get_preload_elf,$(1))" = none ] || { \
+	mkdir -p $(call get_preload_dir,$(1)) && \
+	$(CS152_PRELOAD_SCRIPT) $(call get_preload_elf,$(1)) $(call get_preload_dir,$(1))/preload.hex && \
+	cd $(call get_preload_dir,$(1)); }; } &&
+endif
+endif
+
 # get the output path base name for simulation outputs, First arg is the binary
 get_sim_out_name = $(output_dir)/$(call get_out_name,$(1))
 # sim flags that are common to run-binary/run-binary-fast/run-binary-debug
@@ -378,14 +399,14 @@ run-binary: check-binary $(BINARY).run
 run-binaries: check-binaries $(addsuffix .run,$(BINARIES))
 
 %.run: %.check-exists $(SIM_PREREQ) | $(output_dir)
-	(set -o pipefail && $(NUMA_PREFIX) $(sim) $(PERMISSIVE_ON) $(call get_common_sim_flags,$*) $(VERBOSE_FLAGS) $(PERMISSIVE_OFF) $* $(BINARY_ARGS) </dev/null 2> >(spike-dasm > $(call get_sim_out_name,$*).out) | tee $(call get_sim_out_name,$*).log)
+	(set -o pipefail && $(call get_preload_cmd,$*) $(NUMA_PREFIX) $(sim) $(PERMISSIVE_ON) $(call get_common_sim_flags,$*) $(VERBOSE_FLAGS) $(PERMISSIVE_OFF) $* $(BINARY_ARGS) </dev/null 2> >(spike-dasm > $(call get_sim_out_name,$*).out) | tee $(call get_sim_out_name,$*).log)
 
 # run simulator as fast as possible (no insn disassembly)
 run-binary-fast: check-binary $(BINARY).run.fast
 run-binaries-fast: check-binaries $(addsuffix .run.fast,$(BINARIES))
 
 %.run.fast: %.check-exists $(SIM_PREREQ) | $(output_dir)
-	(set -o pipefail && $(NUMA_PREFIX) $(sim) $(PERMISSIVE_ON) $(call get_common_sim_flags,$*) $(PERMISSIVE_OFF) $* </dev/null | tee $(call get_sim_out_name,$*).log)
+	(set -o pipefail && $(call get_preload_cmd,$*) $(NUMA_PREFIX) $(sim) $(PERMISSIVE_ON) $(call get_common_sim_flags,$*) $(PERMISSIVE_OFF) $* </dev/null | tee $(call get_sim_out_name,$*).log)
 
 # run simulator with as much debug info as possible
 run-binary-debug: check-binary $(BINARY).run.debug
@@ -393,7 +414,7 @@ run-binaries-debug: check-binaries $(addsuffix .run.debug,$(BINARIES))
 
 %.run.debug: %.check-exists $(SIM_DEBUG_PREREQ) | $(output_dir)
 	if [ "$*" != "none" ]; then riscv64-unknown-elf-objdump -D -S $* > $(call get_sim_out_name,$*).dump ; fi
-	(set -o pipefail && $(NUMA_PREFIX) $(sim_debug) $(PERMISSIVE_ON) $(call get_common_sim_flags,$*) $(VERBOSE_FLAGS) $(call get_waveform_flag,$(call get_sim_out_name,$*)) $(PERMISSIVE_OFF) $* </dev/null 2> >(spike-dasm > $(call get_sim_out_name,$*).out) | tee $(call get_sim_out_name,$*).log)
+	(set -o pipefail && $(call get_preload_cmd,$*) $(NUMA_PREFIX) $(sim_debug) $(PERMISSIVE_ON) $(call get_common_sim_flags,$*) $(VERBOSE_FLAGS) $(call get_waveform_flag,$(call get_sim_out_name,$*)) $(PERMISSIVE_OFF) $* </dev/null 2> >(spike-dasm > $(call get_sim_out_name,$*).out) | tee $(call get_sim_out_name,$*).log)
 
 run-fast: run-asm-tests-fast run-bmark-tests-fast
 

@@ -4,6 +4,7 @@ import org.chipsalliance.cde.config.Config
 
 /** 4 KiB, 2-way, 32 B lines. */
 class CS152Lab2Config extends Config(
+  new cs152.WithScratchpadPreload ++
   new cs152.WithL1D(sets = 64, ways = 2, lineBytes = 32) ++
   new sodor.common.WithNSodorCores(1, internalTile = cs152.CS152Stage5Factory) ++
   new testchipip.soc.WithNoScratchpads ++

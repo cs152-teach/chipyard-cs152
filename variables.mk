@@ -281,6 +281,15 @@ get_out_name = $(subst $() $(),_,$(notdir $(basename $(1))))
 LOADMEM ?=
 LOADARCH ?=
 
+# CS152: the lab-2 configs pre-load the Sodor scratchpad with $readmemh, and that
+# pre-load only takes effect together with +loadmem -- the flag that stops fesvr
+# writing the program a word at a time over TSI.  Default it on.
+ifeq ($(LOADMEM),)
+ifneq ($(filter CS152Lab2%,$(CONFIG)),)
+LOADMEM = 1
+endif
+endif
+
 ifneq ($(LOADARCH),)
 override BINARY = $(addsuffix /mem.elf,$(LOADARCH))
 override BINARIES = $(addsuffix /mem.elf,$(LOADARCH))

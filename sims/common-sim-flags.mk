@@ -43,7 +43,17 @@ SIM_PREPROC_DEFINES = \
 	+define+PRINTF_COND=$(TB).printf_cond \
 	+define+STOP_COND=!$(TB).reset \
 	+define+MODEL=$(MODEL) \
-	+define+RANDOMIZE_MEM_INIT \
 	+define+RANDOMIZE_REG_INIT \
 	+define+RANDOMIZE_GARBAGE_ASSIGN \
-	+define+RANDOMIZE_INVALID_ASSIGN
+	+define+RANDOMIZE_INVALID_ASSIGN \
+	$(MEM_INIT_DEFINES)
+
+# CS152: memory randomization is OFF by default, and must stay off for any
+# config that pre-loads a memory with $readmemh (see cs152/CS152Params.scala,
+# CS152PreloadHex).
+RANDOMIZE_MEM ?= 0
+ifeq ($(RANDOMIZE_MEM),1)
+MEM_INIT_DEFINES = +define+RANDOMIZE_MEM_INIT
+else
+MEM_INIT_DEFINES =
+endif
