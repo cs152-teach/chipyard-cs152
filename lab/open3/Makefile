@@ -1,41 +1,47 @@
 ########################################################################
-# CS152 Lab 2: Open-Ended Problem 4.3
+# CS152 Lab 2 -- Open-Ended Problem 3 (cache / kernel co-design)
+#
+#   make                 build transpose.riscv for the simulator
+#   make model           build ./model, the native cache model
+#   make TILE=32         rebuild both with a different tile size
+#   make clean
+#
+# The fast loop is the model.  Use it to search tile sizes and cache
+# geometries; miss counts from it are exact.  Confirm your final choice for
+# each budget on the RTL:
+#
+#   cd $(SIMDIR)
+#   make CONFIG=<budget config> run-binary-fast \
+#        BINARY=$(TESTDIR)/open3/transpose.riscv
+#
+# Only TILE is yours to tune.  N is fixed by the problem statement.
 ########################################################################
 
-SHELL := /bin/sh
+RUNTIME_DIR = ../runtime
+include $(RUNTIME_DIR)/runtime.mk
 
-ifndef RISCV
-$(error source ~cs152/sp21/cs152.lab2.bashrc)
-endif
+N       ?= 64
+TILE    ?= 16
+CO_BASE ?= 8
+DIMS     = -DN=$(N) -DTILE=$(TILE) -DCO_BASE=$(CO_BASE)
 
-base_dir := $(dir $(realpath $(firstword $(MAKEFILE_LIST))))
-base_dir := $(base_dir:/=)
+CFLAGS  += $(DIMS)
+
+HOSTCC      ?= cc
+HOSTCFLAGS  ?= -O2 -std=gnu99 -Wall -I.
 
 .PHONY: all
-all: run
+all: transpose.riscv
 
-spike_dir := $(base_dir)/riscv-isa-sim
-spike := $(spike_dir)/spike
-pk := $(RISCV)/riscv64-unknown-elf/bin/pk
+transpose.riscv: transpose.c kernels.c mem.h $(RUNTIME_DEPS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(RUNTIME_SRCS) transpose.c kernels.c
 
-$(spike_dir)/Makefile: $(spike_dir)/configure
-	cd $(dir $@) && ./configure --prefix=$(base_dir)/install
-
-.PHONY: spike
-spike: $(spike_dir)/Makefile
-	$(MAKE) -C $(spike_dir) spike
+.PHONY: model
+model: model.c kernels.c mem.h
+	$(HOSTCC) $(HOSTCFLAGS) -DCACHE_MODEL $(DIMS) -o model model.c kernels.c
 
 .PHONY: clean
-clean:: $(spike_dir)/Makefile
-	$(MAKE) -C $(spike_dir) clean
+clean:
+	rm -f *.riscv *.dump model
 
-include $(base_dir)/cache.mk
-
-TARGET := riscv
-TARGET_RUN := $(spike) --dc=$(L1D_SETS):$(L1D_WAYS):$(L1D_LINESIZE) --ic=$(L1I_SETS):$(L1I_WAYS):$(L1I_LINESIZE) $(pk)
-TARGET_REDIRECT := | tee
-TARGET_DEPENDS := spike
-
-include $(base_dir)/CPU2006/spec.mk
-
-.SUFFIXES: # Disable built-in rules
+.SUFFIXES:
