@@ -1,0 +1,110 @@
+#!/bin/bash
+# CS152 Lab 2, open-ended 2 -- build and measure one prefetcher on one kernel.
+#
+#   ./prefetcher-runner <model.cc> <kernel> [rtl|eval]
+#
+#   ./prefetcher-runner pf_stream1.cc stream1          # cycles (default)
+#   ./prefetcher-runner pf_stream1.cc stream1 eval     # prediction only, ~1 s
+#
+# rtl   builds the kernel, builds the simulator with your model, runs it twice
+#       -- once with prefetching off, once on -- and prints both sets of cache
+#       counters side by side.  This is the only mode whose numbers you may
+#       quote.
+# eval  builds pf-eval against your model and replays a synthetic copy of the
+#       kernel's access stream.  No RTL, no kernel binary, about a second.  It
+#       reports prediction quality and NO CYCLES, on purpose: it models no
+#       time, no prefetch port and no eviction.  Use it to decide what to
+#       predict, then confirm in rtl.
+set -euo pipefail
+
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# One list, owned by the directory that builds the kernels.
+read -ra ALL_KERNELS < "$HERE/kernels/KERNELS"
+KERNELS=" ${ALL_KERNELS[*]} "
+OUTDIR="$HERE/.run"
+
+die()   { echo "$*" >&2; exit 2; }
+usage() {
+  # Print the header comment, stopping at the first non-comment line.  A
+  # A hardcoded line range drifts as the header is edited.
+  sed -e '1d' -e '/^[^#]/,$d' -e 's/^# \{0,1\}//' "$0"
+  exit "${1:-0}"
+}
+
+parse_args() {
+  [ $# -ge 1 ] && [ "$1" = "-h" ] && usage 0
+  [ $# -ge 2 ] || usage 2
+  MODEL=$1; KERNEL=$2; MODE=${3:-rtl}
+
+  [ -f "$MODEL" ] || die "no such model file: $MODEL"
+  MODEL=$(realpath "$MODEL")
+
+  case "$KERNELS" in
+    *" $KERNEL "*) ;;
+    *) die "unknown kernel: $KERNEL"$'\n'"known:$KERNELS" ;;
+  esac
+  case "$MODE" in
+    rtl|eval) ;;
+    *) die "mode must be rtl or eval, got: $MODE" ;;
+  esac
+}
+
+# ---- eval mode --------------------------------------------------------------
+run_eval() {
+  make -s -f "$HERE/Makefile.eval" -C "$HERE" MODEL="$MODEL" >/dev/null
+  echo
+  "$HERE/pf-eval" "$KERNEL"
+}
+
+# ---- rtl mode ---------------------------------------------------------------
+# Pull one counter out of a run's log.  The counters are the region-of-interest
+# ones the kernel prints itself, so they exclude setup and all host I/O.
+ctr() { sed -n "s/^  $2 *: *//p" "$1/out" 2>/dev/null | head -1; }
+
+print_counters() {
+  local d0="$OUTDIR/$KERNEL.pf0" d1="$OUTDIR/$KERNEL.pf1" name
+  printf "\n  %-14s %14s %14s\n" "" "+prefetch=0" "+prefetch=1"
+  printf "  %-14s %14s %14s\n" "-------------" "-----------" "-----------"
+  for name in cycles loads stores hits misses writebacks; do
+    printf "  %-14s %14s %14s\n" "$name" "$(ctr "$d0" "$name")" "$(ctr "$d1" "$name")"
+  done
+  printf "  %-14s %14s %14s\n" "miss rate" \
+    "$(sed -n 's/^  miss rate *: *//p' "$d0/out" | head -1)" \
+    "$(sed -n 's/^  miss rate *: *//p' "$d1/out" | head -1)"
+
+  local b p s0 s1
+  b=$(ctr "$d0" cycles); p=$(ctr "$d1" cycles)
+  s0=$(grep -oE 'sink=[0-9]+' "$d0/out" | cut -d= -f2)
+  s1=$(grep -oE 'sink=[0-9]+' "$d1/out" | cut -d= -f2)
+  echo
+  if [ -n "${b:-}" ] && [ -n "${p:-}" ] && [ "$p" -gt 0 ]; then
+    printf "  speedup   %s\n" "$(awk -v a="$b" -v c="$p" 'BEGIN{printf "%.4fx", a/c}')"
+  fi
+  # A prefetcher may change WHEN data arrives, never what the program computes.
+  if [ -n "${s0:-}" ] && [ "${s0:-x}" = "${s1:-y}" ]; then
+    printf "  answer    sink=%s, identical in both runs\n" "$s0"
+  else
+    printf "  answer    MISMATCH: %s vs %s -- your prefetcher corrupts data,\n" \
+           "${s0:-none}" "${s1:-none}"
+    printf "            so the speedup above is meaningless.\n"
+    return 1
+  fi
+}
+
+run_rtl() {
+  make -s -C "$HERE/kernels" "$KERNEL.riscv"
+  "$HERE/build-prefetcher" "$MODEL" >/dev/null
+  OUTDIR="$OUTDIR" "$HERE/run-suite" "$KERNEL" >/dev/null 2>&1 || true
+  print_counters
+}
+
+main() {
+  parse_args "$@"
+  printf "model: %s   kernel: %s   mode: %s\n" "$(basename "$MODEL")" "$KERNEL" "$MODE"
+  case "$MODE" in
+    eval) run_eval ;;
+    rtl)  run_rtl  ;;
+  esac
+}
+
+main "$@"

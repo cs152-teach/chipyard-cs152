@@ -1,0 +1,134 @@
+#!/bin/bash
+# CS152 Lab 2, open-ended 2 -- run the suite twice and report the speedup.
+#
+#   ./run-suite                 # every kernel
+#   ./run-suite tile chase      # just these
+
+set -uo pipefail
+
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+ROOT=$(cd "$HERE/../.." && pwd)
+SIM="$ROOT/sims/verilator/simulator-chipyard.harness-${PF_CONFIG:-CS152Lab2PrefetchConfig}"
+PRELOAD="$ROOT/scripts/cs152-preload.sh"
+
+# check lab environment
+for _t in elf2hex; do
+  if ! command -v "$_t" >/dev/null 2>&1; then
+    echo "$_t not on PATH -- the lab environment is not active." >&2
+    echo "Run:  source ~/cs152-env.sh cs152-lab2-fa26" >&2
+    exit 2
+  fi
+done
+
+if [ ! -x "$SIM" ]; then
+  echo "no simulator -- run ./build-prefetcher first" >&2; exit 2
+fi
+
+# The kernel list belongs to the directory that builds them; read it rather
+# than keeping a fourth copy in step by hand.
+read -ra ALL_KERNELS < "$HERE/kernels/KERNELS"
+MAX_CYCLES=${MAX_CYCLES:-15000000}      # matches variables.mk's TIMEOUT_CYCLES
+
+KERNELS=("$@")
+if [ ${#KERNELS[@]} -eq 0 ]; then
+  KERNELS=("${ALL_KERNELS[@]}")
+fi
+
+OUTDIR=${OUTDIR:-$HERE/.run}
+mkdir -p "$OUTDIR"
+
+JOBS=${JOBS:-8}
+pids=""
+
+launch() {   # $1 = elf, $2 = pf, $3 = tag
+  local elf=$1 pf=$2 dir="$OUTDIR/$3.pf$2"
+  rm -rf "$dir"; mkdir -p "$dir"
+
+  [ -f "$OUTDIR/$3.hex" ] || "$PRELOAD" "$elf" "$OUTDIR/$3.hex" >/dev/null 2>&1 || return 1
+  ln -f "$OUTDIR/$3.hex" "$dir/preload.hex"
+  (
+    cd "$dir" && "$SIM" +permissive "+loadmem=$elf" "+prefetch=$pf" \
+                        "+max-cycles=$MAX_CYCLES" \
+                        +permissive-off "$elf" >out 2>&1
+  ) &
+  pids="$pids $!"
+
+  while [ "$(pf_running)" -ge "$JOBS" ]; do sleep 1; done
+}
+
+# How many of the runs we launched are still alive.
+pf_running() {
+  local n=0 p
+  for p in $pids; do kill -0 "$p" 2>/dev/null && n=$((n + 1)); done
+  echo "$n"
+}
+
+echo "launching $(( ${#KERNELS[@]} * 2 )) runs, up to $JOBS at a time"
+for k in "${KERNELS[@]}"; do
+  elf="$HERE/kernels/$k.riscv"
+  [ -f "$elf" ] || { echo "  $k: not built"; continue; }
+  launch "$elf" 0 "$k"
+  launch "$elf" 1 "$k"
+done
+wait
+
+# $1 = run directory, $2 = counter name, from bench_report's line.
+stat_of() { grep -oE "$2=[0-9]+" "$1/out" 2>/dev/null | head -1 | cut -d= -f2; }
+
+printf "\n%-12s %12s %12s %9s\n" kernel baseline prefetch speedup
+printf "%-12s %12s %12s %9s\n" ------ -------- -------- -------
+total_b=0; total_p=0; bad_sink=0
+for k in "${KERNELS[@]}"; do
+  d0="$OUTDIR/$k.pf0"; d1="$OUTDIR/$k.pf1"
+  b=$(stat_of "$d0" cycles); p=$(stat_of "$d1" cycles)
+  if [ -z "${b:-}" ] || [ -z "${p:-}" ]; then
+    printf "%-12s %12s\n" "$k" "RUN FAILED"; bad_sink=1; continue
+  fi
+  printf "%-12s %12s %12s %9s\n" "$k" "$b" "$p" \
+    "$(awk -v a="$b" -v c="$p" 'BEGIN{printf "%.4fx", a/c}')"
+  total_b=$((total_b + b)); total_p=$((total_p + p))
+  for d in "$d0" "$d1"; do
+    if grep -qE '^  BAD|!!' "$d/out" 2>/dev/null; then
+      echo "    self-check failed: $d/out" >&2
+      grep -E '^  BAD|!!' "$d/out" | head -2 >&2
+    fi
+  done
+  # THE invariant.  A prefetcher may only change *when* data arrives, never
+  # what the program computes, so every kernel's sink must be bit-identical
+  # across the two runs.  Checking cycles and misses alone is not enough: a
+  # prefetcher that commits a line under a stale tag, or that drops a dirty
+  # victim's writeback, gets *faster* and *fewer misses* while returning the
+  # wrong answer.  Without this check that reads as a clean speedup.
+  sb=$(stat_of "$d0" sink); sp=$(stat_of "$d1" sink)
+  if [ -z "${sb:-}" ] || [ -z "${sp:-}" ]; then
+    echo "    !! $k: no sink= in one of the runs -- cannot verify correctness" >&2
+    bad_sink=1
+  elif [ "$sb" != "$sp" ]; then
+    echo "    !! $k: WRONG ANSWER -- sink=$sb without prefetching, $sp with it." >&2
+    echo "       Your prefetcher corrupts data; the speedup below is meaningless." >&2
+    bad_sink=1
+  fi
+  # A prefetcher changes which accesses hit, never which accesses happen, so it
+  # cannot manufacture misses.
+  mb=$(stat_of "$d0" misses); mp=$(stat_of "$d1" misses)
+  if [ -n "${mb:-}" ] && [ -n "${mp:-}" ] && [ "$mp" -gt "$mb" ]; then
+    echo "    !! $k: prefetching INCREASED misses, $mb -> $mp" >&2
+  fi
+done
+# With one prefetcher per kernel, a single-kernel run's TOTAL just repeats the
+# row above it, and the cycle-weighting note below is noise.  Only print the
+# total when there is actually something to total up.
+if [ "$total_p" -gt 0 ] && [ ${#KERNELS[@]} -gt 1 ]; then
+  printf "%-12s %12s %12s %9s\n" TOTAL "$total_b" "$total_p" \
+    "$(awk -v a="$total_b" -v c="$total_p" 'BEGIN{printf "%.4fx", a/c}')"
+  echo
+  echo "The total is cycle-weighted, so the memory-bound kernels dominate it."
+  echo "Report per-kernel numbers too: a model that wins the total while losing"
+  echo "chase has learned the wrong lesson."
+fi
+
+if [ "${bad_sink:-0}" -ne 0 ]; then
+  echo "SUITE FAILED: at least one kernel computed the wrong answer with" >&2
+  echo "prefetching on.  Fix correctness before reading any speedup above." >&2
+  exit 1
+fi

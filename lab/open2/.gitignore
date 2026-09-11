@@ -1,2 +1,5 @@
+*.riscv
 *.dump
-*.sg
+.run/
+pf-eval
+pf-eval-*

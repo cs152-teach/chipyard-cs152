@@ -25,6 +25,7 @@ class FixedLatencyMem(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) ext
   val io = IO(new Bundle {
     val cache = Flipped(new DramPortIo)
     val mem   = new MemPortIo(data_width = 32)   // to scratchpad D-port
+    val kill  = if (cfg.prefetch) Some(Input(Bool())) else None
   })
 
   // Default comes from the Scala config, so the plain make flow needs no flags.
@@ -57,6 +58,10 @@ class FixedLatencyMem(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) ext
     when (count === 0.U) { state := sIdle }
       .otherwise         { count := count - 1.U }
   }
+  // One name for it, rather than three spellings of io.kill below.
+  val kill = io.kill.getOrElse(false.B)
+  // After the countdown update, so a kill in the same cycle wins.
+  when (kill) { state := sIdle }
 
   // The cycle we actually touch the storage array.
   val doAccess = zeroLat || (state === sWait && count === 0.U)
@@ -69,6 +74,15 @@ class FixedLatencyMem(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) ext
   io.mem.req.bits.typ  := accReq.typ
 
   // The scratchpad is combinational: data is available the cycle we ask.
-  io.cache.resp.valid := doAccess
+  io.cache.resp.valid := doAccess && !kill
   io.cache.resp.bits  := io.mem.resp.bits.data
+
+  if (cfg.prefetch) {
+    val lastAddr = Reg(UInt(32.W))
+    val haveLast = RegInit(false.B)
+    when (doAccess) { lastAddr := accReq.addr; haveLast := true.B }
+    when (kill) { haveLast := false.B }
+    assert(!(accept && inReq.burst && haveLast && inReq.addr =/= lastAddr + 4.U),
+      "CS152 FixedLatencyMem: burst continuation does not follow the previous beat")
+  }
 }

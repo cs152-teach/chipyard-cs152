@@ -11,6 +11,7 @@ case class CS152CacheParams(
   dramLat: Int = 20,
   hitLat: Int = 1,
   mystery: Boolean = false,
+  prefetch: Boolean = false,
   // Not yet implemented -- present so the config surface matches the lab spec.
   writeBack: Boolean = true,
   writeAllocate: Boolean = true,
@@ -43,7 +44,8 @@ case class CS152CacheParams(
     else
       f"CS152 L1D: ${capacityBytes}%d B = $sets%d sets x $ways%d ways x $lineBytes%d B/line " +
       f"(tag=$tagBits%d index=$indexBits%d offset=$offsetBits%d, repl=$replacement, " +
-      f"hit_lat=$hitLat%d dram_lat=$dramLat%d)"
+      f"hit_lat=$hitLat%d dram_lat=$dramLat%d" +
+      (if (prefetch) ", prefetch enabled)" else ")")
 }
 
 /* Per-line coherence state. */
@@ -92,10 +94,12 @@ class WithL1D(
   dramLat: Int = 20,
   hitLat: Int = 1,
   replacement: String = "lru",
-  mystery: Boolean = false
+  mystery: Boolean = false,
+  prefetch: Boolean = false
 ) extends Config((site, here, up) => {
   case CS152CacheKey =>
     CS152CacheParams(sets, ways, lineBytes, dramLat, hitLat, mystery = mystery,
+                     prefetch = prefetch,
                      writeBack = true, writeAllocate = true,
                      replacement = replacement)
 })

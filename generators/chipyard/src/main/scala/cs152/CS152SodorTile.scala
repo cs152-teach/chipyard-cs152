@@ -16,6 +16,7 @@ import chisel3.util._
 import chisel3.util.experimental.loadMemoryFromFileInline
 import org.chipsalliance.cde.config.Parameters
 import freechips.rocketchip.diplomacy.AddressSet
+import freechips.rocketchip.util.PlusArg
 import sodor.common._
 import sodor.common.Constants._
 
@@ -70,6 +71,30 @@ class CS152SodorInternalTile(range: AddressSet, coreCtor: SodorCoreFactory)
 
   fmem.io.cache <> cache.io.dram
   fmem.io.mem   <> memory.io.core_ports(DPORT)
+
+  // ---------------- prefetch port (open-ended 2) ----------------
+  if (cfg.prefetch) {
+    val pfio = cache.io.pf.get
+    println("    CS152 prefetcher:      C++ model over DPI, degree 1")
+
+    val m = Module(new ModelPrefetcher(cfg))
+    m.io.clock    := clock
+    m.io.reset    := reset.asBool
+    m.io.accValid := pfio.accValid
+    m.io.accAddr  := pfio.accAddr
+    m.io.accWrite := pfio.accWrite
+    m.io.accMiss  := pfio.accMiss
+    m.io.busy     := pfio.busy
+    m.io.dropped  := pfio.dropped
+
+    val pfEnable = PlusArg("prefetch", 1, "1 = honour prefetch requests, 0 = baseline")(0)
+
+    val legal = range.contains(m.io.req.bits)
+    pfio.req.valid := m.io.req.valid && legal && pfEnable
+    pfio.req.bits  := m.io.req.bits
+
+    fmem.io.kill.get := pfio.dramKill
+  }
 
   // Host checks cache snoop bus, return on hit, or get data from memory
   val hostPort = Module(new HostSnoopPort)

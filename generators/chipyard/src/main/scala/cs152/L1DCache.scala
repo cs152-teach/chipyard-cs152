@@ -38,6 +38,19 @@ class L1DSnoopIO extends Bundle {
   val rdata = Output(UInt(32.W))
 }
 
+class L1DPrefetchIO extends Bundle {
+  val req     = Flipped(Valid(UInt(32.W)))      // byte address; masked to a line here
+  val busy    = Output(Bool())                  // a prefetch is in flight
+  val dropped = Output(Bool())                  // the last request that fired was refused
+
+  val accValid = Output(Bool())
+  val accAddr  = Output(UInt(32.W))
+  val accWrite = Output(Bool())
+  val accMiss  = Output(Bool())
+
+  val dramKill = Output(Bool())          // to FixedLatencyMem, not the model
+}
+
 class L1DCache(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Module {
   val io = IO(new Bundle {
     val core     = Flipped(new MemPortIo(data_width = 32))
@@ -46,6 +59,7 @@ class L1DCache(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Mo
     val flushReq = Input(Bool())    // pulse: write back every dirty line, then INVALIDATE
     val cleanReq = Input(Bool())    // pulse: write back every dirty line, keep it VALID
     val snoop    = new L1DSnoopIO
+    val pf       = if (cfg.prefetch) Some(new L1DPrefetchIO) else None
   })
 
   println("    " + cfg.summary)
@@ -146,8 +160,19 @@ class L1DCache(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Mo
     }
   }
 
+  // ---------------- prefetch forward declarations ----------------
+  val pfMergeStall = WireDefault(false.B)   // demand access waiting on an in-flight prefetch of ITS line
+  val pfKill       = WireDefault(false.B)   // that prefetch dies this cycle
+  val pfArrWen     = WireDefault(false.B)   // a prefetch beat lands in the data array
+  val pfArrAddr    = WireDefault(0.U(dataAddrBits.W))
+  val pfArrData    = WireDefault(0.U(32.W))
+  val pfDramVal    = WireDefault(false.B)   // the prefetch wants the DRAM port
+  val pfDramAddr   = WireDefault(0.U(32.W))
+  val pfDramBurst  = WireDefault(false.B)
+  val pfOwnsDram   = WireDefault(false.B)
+
   // ---------------- the cycle the core's access actually happens ----------
-  val idleHitNow  = isIdle && req.valid && !flushPending && isHit && (hitLat <= 1.U)
+  val idleHitNow  = isIdle && req.valid && !flushPending && !pfMergeStall && isHit && (hitLat <= 1.U)
   val waitDoneNow = (state === sHitWait) && (hitCnt === 0.U)
   val accessNow   = idleHitNow || waitDoneNow
 
@@ -176,7 +201,7 @@ class L1DCache(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Mo
   }
   val dReadData = data.read(dReadAddr, dReadSize, dReadSigned)
 
-  val fillBeatNow = (state === sFill) && io.dram.resp.valid
+  val fillBeatNow = (state === sFill) && io.dram.resp.valid && !pfOwnsDram
   val dWriteAddr = Wire(UInt(dataAddrBits.W))
   val dWriteData = Wire(UInt(32.W))
   val dWriteSize = Wire(UInt(2.W))
@@ -193,6 +218,8 @@ class L1DCache(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Mo
     dWriteEn   := accessNow && (accessFcn === M_XWR)
   }
   data.write(dWriteAddr, dWriteData, dWriteSize, dWriteEn)
+
+  if (cfg.prefetch) data.write(pfArrAddr, pfArrData, 2.U, pfArrWen)
 
   // ---------------- snoop port ----------------
   val snIdx = idxOf(io.snoop.addr)
@@ -228,6 +255,19 @@ class L1DCache(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Mo
     io.dram.req.bits.data := 0.U
   }
 
+  def demandDram = state === sWriteback || state === sFill || flushingWb
+  // prefetcher to dram ios
+  if (cfg.prefetch) {
+    when (!demandDram && pfDramVal) {
+      io.dram.req.valid      := !dramBusy
+      io.dram.req.bits.addr  := pfDramAddr
+      io.dram.req.bits.fcn   := M_XRD
+      io.dram.req.bits.data  := 0.U
+      io.dram.req.bits.burst := pfDramBurst
+    }
+    when (pfKill && pfOwnsDram) { dramBusy := false.B }
+  }
+
   val lastBeat = beat === (wordsPerLine - 1).U
 
   // ---------------- FSM ----------------
@@ -257,7 +297,7 @@ class L1DCache(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Mo
     is (sIdle) {
       when (flushPending) {
         state := sFlush
-      } .elsewhen (req.valid) {
+      } .elsewhen (req.valid && !pfMergeStall) {
         when (isHit) {
           when (hitLat <= 1.U) {
             touch(reqIdx, hitWay)
@@ -288,7 +328,7 @@ class L1DCache(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Mo
     }
 
     is (sWriteback) {
-      when (io.dram.resp.valid) {
+      when (io.dram.resp.valid && !pfOwnsDram) {
         when (lastBeat) {
           beat := 0.U
           dirtys(rWay)(rIdx) := false.B
@@ -300,7 +340,7 @@ class L1DCache(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Mo
     }
 
     is (sFill) {
-      when (io.dram.resp.valid) {
+      when (io.dram.resp.valid && !pfOwnsDram) {
         when (lastBeat) {
           beat := 0.U
           tags(rWay)(rIdx)   := tagOf(rAddr)
@@ -324,7 +364,7 @@ class L1DCache(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Mo
     }
 
     is (sFlushWb) {
-      when (io.dram.resp.valid) {
+      when (io.dram.resp.valid && !pfOwnsDram) {
         when (lastBeat) {
           beat := 0.U
           flushAdvance()
@@ -339,7 +379,7 @@ class L1DCache(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Mo
   io.core.resp.valid     := accessNow
   io.core.resp.bits.data := dReadData
 
-  val accepted = isIdle && req.valid && !flushPending
+  val accepted = isIdle && req.valid && !flushPending && !pfMergeStall
   io.stats.load      := accepted && (req.bits.fcn === M_XRD)
   io.stats.store     := accepted && (req.bits.fcn === M_XWR)
   io.stats.hit       := accepted &&  isHit
@@ -348,4 +388,118 @@ class L1DCache(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Mo
                         ((state === sFlush) && L1State.isValid(states(flushWay)(flushIdx)) && dirtys(flushWay)(flushIdx))
   io.stats.snoopAccess := io.snoop.valid
   io.stats.snoopHit    := io.snoop.valid && snHit
+
+  // ================= prefetch context =====================================
+  if (cfg.prefetch) {
+    val pfio = io.pf.get
+
+    val pfIdle :: pfFill :: Nil = Enum(2)
+    val pfState = RegInit(pfIdle)
+    val pfAddr  = Reg(UInt(32.W))
+    val pfWay   = Reg(UInt(wayIdxBits.W))
+    val pfBeat  = RegInit(0.U(beatBits.W))
+    val pfDrop  = RegInit(false.B)
+
+    val pfBusy = pfState === pfFill
+    val pfIdxR = idxOf(pfAddr)
+
+    // ---- the incoming request, line-aligned in hardware ----
+    val pfrAddr = Cat(pfio.req.bits(31, offsetBits), 0.U(offsetBits.W))
+    val pfrIdx  = idxOf(pfrAddr)
+    val pfrTag  = tagOf(pfrAddr)
+
+    // Tags are Reg(Vec), so this lookup is free and costs the core nothing.
+    val pfrResident = VecInit((0 until ways).map(w =>
+      L1State.isValid(states(w)(pfrIdx)) && tags(w)(pfrIdx) === pfrTag)).asUInt.orR
+
+    // ---- victim ----
+    val pfrInvalidVec = VecInit((0 until ways).map(w => !L1State.isValid(states(w)(pfrIdx))))
+    val pfrHasInvalid = pfrInvalidVec.asUInt.orR
+    val pfrVictim = if (ways == 1) 0.U(1.W) else {
+      val replaceWay = if (replacement == "rand") LFSR(16)(wayBits - 1, 0)
+                       else OHToUInt(VecInit((0 until ways).map(w =>
+                              ages.get(pfrIdx)(w) === (ways - 1).U)).asUInt)
+      Mux(pfrHasInvalid, PriorityEncoder(pfrInvalidVec.asUInt), replaceWay)
+    }
+    val pfrVictimDirty = L1State.isValid(states(pfrVictim)(pfrIdx)) && dirtys(pfrVictim)(pfrIdx)
+
+    // ---- launch ----
+    val pfReady  = (pfState === pfIdle) && !flushPending && !demandDram && !dramBusy
+    val pfFire   = pfio.req.valid && pfReady
+    val pfAccept = pfFire && !pfrResident && !pfrVictimDirty
+
+    when (pfAccept) {
+      pfAddr  := pfrAddr
+      pfWay   := pfrVictim
+      pfBeat  := 0.U
+      pfState := pfFill
+      states(pfrVictim)(pfrIdx) := L1State.I
+      dirtys(pfrVictim)(pfrIdx) := false.B
+    }
+    pfDrop := pfFire && !pfAccept
+
+    // ---- merge ----
+    val reqLine = req.bits.addr(31, offsetBits)
+    val pfLine  = pfAddr(31, offsetBits)
+    pfMergeStall := pfBusy && req.valid && (reqLine === pfLine)
+
+    // ---- kill ----
+    val demandStarting = isIdle && req.valid && !flushPending && !pfMergeStall && !isHit
+    val snoopWrite = io.snoop.valid && io.snoop.write
+    /* Gate on the state, not on the transitions into it: enumerating the
+       entries into a demand DRAM op means missing one breaks the "one owner"
+       invariant silently. */
+    pfKill := pfBusy && (demandDram || demandStarting || snoopWrite ||
+                         io.flushReq || io.cleanReq || flushPending)
+
+    // ---- beats ----
+    val pfOwner = RegInit(false.B)
+    when (io.dram.req.fire) { pfOwner := !demandDram && pfDramVal }
+    pfOwnsDram := pfOwner
+
+    val pfRespNow = pfBusy && !pfKill && pfOwner && io.dram.resp.valid
+    val pfBeatOff = if (wordsPerLine == 1) 0.U(offsetBits.W)
+                    else Cat(pfBeat(log2Ceil(wordsPerLine) - 1, 0), 0.U(2.W))
+    val pfLastBeat = pfBeat === (wordsPerLine - 1).U
+
+    pfDramVal   := pfBusy && !pfKill
+    pfDramAddr  := lineAddr(tagOf(pfAddr), pfIdxR, pfBeatOff)
+    pfDramBurst := pfBeat =/= 0.U
+
+    pfArrWen  := pfRespNow
+    pfArrAddr := dataAddr(pfWay, pfIdxR, pfBeatOff)
+    pfArrData := io.dram.resp.bits
+
+    when (pfRespNow) {
+      when (pfLastBeat) {
+        // Commit.  pfBeat needs no reset: every launch zeroes it, and it is
+        // only ever read while pfState === pfFill.  A fill always lands in M: single core, no coherence.
+        tags(pfWay)(pfIdxR)   := tagOf(pfAddr)
+        states(pfWay)(pfIdxR) := L1State.M
+        dirtys(pfWay)(pfIdxR) := false.B
+        pfState := pfIdle
+      } .otherwise {
+        pfBeat := pfBeat + 1.U
+      }
+    }
+
+    when (pfKill) { pfState := pfIdle }
+
+    // ---- outputs ----
+    pfio.busy      := pfBusy
+    pfio.dropped   := pfDrop
+
+    pfio.accValid := accepted
+    pfio.accAddr  := req.bits.addr
+    pfio.accWrite := req.bits.fcn === M_XWR
+    pfio.accMiss  := accepted && !isHit
+
+    pfio.dramKill := pfKill && pfOwner
+
+    // The two invariants the whole design rests on.
+    assert(!(demandDram && pfDramVal),
+           "CS152 L1D: demand and prefetch both driving the DRAM port")
+    assert(!(pfAccept && demandDram),
+           "CS152 L1D: prefetch launched while the demand owns the DRAM port")
+  }
 }

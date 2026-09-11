@@ -1,0 +1,30 @@
+########################################################################
+# pf-eval -- the RTL-free evaluator.  Host g++, no simulator.
+#
+#   make -f Makefile.eval                    build against ./prefetcher.cc
+#   make -f Makefile.eval MODEL=my_model.cc  build against another model
+#   ./pf-eval [kernel ...]                   the model you built last
+#   ./pf-eval-my_model [kernel ...]          that model specifically
+########################################################################
+MODEL    ?= prefetcher.cc
+CXX      ?= g++
+CXXFLAGS ?= -O2 -std=c++14
+
+# A model may be split across headers beside it; list them so editing one
+# rebuilds.  Quoted includes resolve relative to the model's own directory,
+# so no -I is needed.
+MODEL_HDRS := $(wildcard $(dir $(MODEL))*.h $(dir $(MODEL))*.inc)
+BIN := pf-eval-$(basename $(notdir $(MODEL)))
+
+.DEFAULT_GOAL := pf-eval
+
+$(BIN): pf-eval.cc $(MODEL) $(MODEL_HDRS)
+	$(CXX) $(CXXFLAGS) -o $@ pf-eval.cc $(MODEL)
+
+.PHONY: pf-eval clean
+pf-eval: $(BIN)
+	@ln -sf $(BIN) $@
+	@echo "pf-eval -> $(BIN)"
+
+clean:
+	rm -f pf-eval pf-eval-*

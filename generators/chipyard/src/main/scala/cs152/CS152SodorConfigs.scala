@@ -23,4 +23,10 @@ class CS152Lab2Config4Way extends Config(
 class CS152Lab2Config8Way extends Config(
   new cs152.WithL1D(sets = 16,  ways = 8, lineBytes = 32) ++ new CS152Lab2Config)
 
+
+// Open-ended 2 -- hardware prefetcher
+class CS152Lab2PrefetchConfig extends Config(
+  new cs152.WithL1D(sets = 64, ways = 2, lineBytes = 32, prefetch = true) ++
+  new CS152Lab2Config)
+
 // TODO: Add your own configs here :)
