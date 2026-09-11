@@ -15,13 +15,32 @@ struct Access {
 /* Registered status from the prefetch port. */
 struct Status {
   bool busy;      /* a prefetch of yours is in flight (issued, not yet landed) */
-  bool dropped;   /* the request you returned last cycle was refused */
+  bool dropped;   /* your last request was looked at and refused */
 };
 
 /* Return {false, 0} for "no request this cycle". */
 struct PrefetchReq {
   bool     valid;
   uint32_t addr;
+};
+
+struct Pending {
+  bool     valid = false;
+  uint32_t addr  = 0;
+
+  /* Call once at the top of tick(). */
+  void observe(const Status &st) { if (st.busy || st.dropped) valid = false; }
+
+  /* Ask for this line.  Replaces whatever you were holding: a target the port
+     has not taken is stale as soon as the program moves on. */
+  void want(uint32_t byte_addr) { addr = byte_addr; valid = true; }
+
+  /* Return this from tick(). */
+  PrefetchReq offer() const
+  {
+    if (!valid) return { false, 0 };
+    return { true, addr };
+  }
 };
 
 class Prefetcher {
@@ -41,12 +60,25 @@ public:
   /* Called once per cycle. */
   PrefetchReq tick(const Access &acc, const Status &status)
   {
+    pend_.observe(status);
+
+    /* EXAMPLE -- next-line prefetching, which is all one unit-stride
+       stream needs.  Uncomment it to try it, then write your own policy:
+
+           if (acc.valid) {
+             uint32_t line = acc.addr / line_bytes_;
+             pend_.want((line + 1) * line_bytes_);
+           }
+     */
+
     /* TODO: replace this with your policy. */
-    (void)acc; (void)status;
-    return { false, 0 };
+    (void)acc;
+
+    return pend_.offer();
   }
 
 private:
+  Pending  pend_;
   unsigned line_bytes_ = 32;
   unsigned sets_       = 64;
   unsigned ways_       = 2;
