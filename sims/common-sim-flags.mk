@@ -1,18 +1,10 @@
 #----------------------------------------------------------------------------------------
 # common gcc configuration/optimization
 #----------------------------------------------------------------------------------------
-SIM_OPT_CXXFLAGS := -O2
-
-# Workaround: esp-isa-sim doesn't install libriscv,
-# so don't link with libriscv if it doesn't exist
-# potentially breaks some configs
-
-ifeq (,$(wildcard $(RISCV)/lib/libriscv.so))
-$(warning libriscv not found)
-LRISCV=
-else
+SIM_OPT_CXXFLAGS := -O3
 LRISCV=-lriscv
-endif
+
+export USE_CHISEL6=1
 
 SIM_CXXFLAGS = \
 	$(CXXFLAGS) \
@@ -46,7 +38,8 @@ SIM_PREPROC_DEFINES = \
 	+define+RANDOMIZE_REG_INIT \
 	+define+RANDOMIZE_GARBAGE_ASSIGN \
 	+define+RANDOMIZE_INVALID_ASSIGN \
-	$(MEM_INIT_DEFINES)
+	$(MEM_INIT_DEFINES) \
+	$(EXTRA_SIM_PREPROC_DEFINES)
 
 # CS152: memory randomization is OFF by default, and must stay off for any
 # config that pre-loads a memory with $readmemh (see cs152/CS152Params.scala,

@@ -16,7 +16,9 @@ env.sh
 tags
 *~
 .bsp/
+# CS152: the lab links .conda-env to the shared env, so match a symlink too
 .conda-env
+.conda-lock-env/
 .#*
 first-clone-setup-fast-log
 .bloop/
@@ -28,3 +30,5 @@ project/project/
 .sbt
 .classpath_cache/
 .vscode/
+tests/build/
+conda-reqs/chipyard-base.yaml.bak
