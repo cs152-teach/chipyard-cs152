@@ -33,8 +33,11 @@ HOSTCFLAGS  ?= -O2 -std=gnu99 -Wall -I.
 .PHONY: all
 all: transpose.riscv
 
+# -lgcc for the same reason runtime.mk names it: Sodor has no multiplier, so
+# printf and setStats pull in the libgcc soft div/mod routines, and -nostdlib
+# drops libgcc along with libc.
 transpose.riscv: transpose.c kernels.c mem.h $(RUNTIME_DEPS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(RUNTIME_SRCS) transpose.c kernels.c
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(RUNTIME_SRCS) transpose.c kernels.c -lgcc
 
 .PHONY: model
 model: model.c kernels.c mem.h
