@@ -32,3 +32,11 @@ project/project/
 .vscode/
 tests/build/
 conda-reqs/chipyard-base.yaml.bak
+
+# CS152 staff-only material.  These must never be tracked: .git/info/exclude is
+# per-clone and does not survive a fresh clone, so the rule lives here instead.
+# Naming them costs nothing -- the handout already says the mystery config is
+# not in the student repository -- and it makes `git add -A` safe.
+staff/
+generators/chipyard/src/main/scala/cs152/CS152MysteryConfigs.scala
+lib/mystery*.jar
