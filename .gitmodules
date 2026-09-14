@@ -166,6 +166,3 @@
 [submodule "software/spec2026"]
 	path = software/spec2026
 	url = https://github.com/ucb-bar/spec2026-workload.git
-[submodule "lab/open3/riscv-isa-sim"]
-	path = lab/open3/riscv-isa-sim
-	url = https://github.com/riscv/riscv-isa-sim.git
