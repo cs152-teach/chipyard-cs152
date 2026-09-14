@@ -22,9 +22,9 @@
 
 static int SETS = 64, WAYS = 2, LINE = 32;
 
-/* Matching the RISC-V build: two static arrays, B directly after A. */
-static uint32_t A_BASE = 0x80000000u;
-static uint32_t B_BASE = 0x80000000u + (uint32_t)(N * N * 4);
+#define ALIGN_UP(x, a) (((x) + (a) - 1u) / (a) * (a))
+static const uint32_t A_BASE = 0x80000000u;
+static const uint32_t B_BASE = 0x80000000u + ALIGN_UP((uint32_t)(N * N * 4), MATRIX_ALIGN);
 
 static int32_t Adata[N * N];
 static int32_t Bdata[N * N];
@@ -106,8 +106,13 @@ static void fill(void)
   for (int k = 0; k < N * N; k++) {
     s ^= s << 13; s ^= s >> 17; s ^= s << 5;
     Adata[k] = (int32_t)s;
-    Bdata[k] = 0;
   }
+}
+
+/* See transpose.c.  Not routed through access(), the same way fill() is not. */
+static void poison_B(void)
+{
+  for (int k = 0; k < N * N; k++) Bdata[k] = B_POISON;
 }
 
 static int check(void)
@@ -120,6 +125,7 @@ static int check(void)
 
 static int run(const char *name, void (*kernel)(void), int csv)
 {
+  poison_B();
   cache_reset();
   kernel();
   int ok = check();
@@ -145,11 +151,13 @@ static int alloc_cache(void)
   return L != NULL;
 }
 
-static void run_all(int csv)
+static int run_all(int csv)
 {
-  run("naive",     transpose_naive,     csv);
-  run("blocked",   transpose_blocked,   csv);
-  run("oblivious", transpose_oblivious, csv);
+  int bad = 0;
+  bad |= run("naive",     transpose_naive,     csv);
+  bad |= run("blocked",   transpose_blocked,   csv);
+  bad |= run("oblivious", transpose_oblivious, csv);
+  return bad;
 }
 
 int main(int argc, char **argv)
@@ -160,9 +168,6 @@ int main(int argc, char **argv)
     if      (!strcmp(argv[i], "--sets")  && i + 1 < argc) SETS = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--ways")  && i + 1 < argc) WAYS = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--line")  && i + 1 < argc) LINE = atoi(argv[++i]);
-    else if (!strcmp(argv[i], "--a-base") && i + 1 < argc) A_BASE = strtoul(argv[++i], 0, 0);
-    else if (!strcmp(argv[i], "--b-base") && i + 1 < argc) B_BASE = strtoul(argv[++i], 0, 0);
-    else if (!strcmp(argv[i], "--csv"))   csv = 1;
     else if (!strcmp(argv[i], "--sweep")) { sweep = 1; csv = 1; }
     else { fprintf(stderr, "unknown option %s\n", argv[i]); return 2; }
   }
@@ -176,12 +181,12 @@ int main(int argc, char **argv)
              N, TILE, SETS, WAYS, LINE, SETS * WAYS * LINE);
     else
       printf("n,tile,sets,ways,line,kernel,hits,misses,writebacks,status\n");
-    run_all(csv);
-    return 0;
+    return run_all(csv);
   }
 
+  int bad = 0;
   printf("n,tile,sets,ways,line,kernel,hits,misses,writebacks,status\n");
-  int caps[]  = {1024, 2048, 4096, 8192};
+  int caps[]  = {1024, 2048, 4096, MATRIX_ALIGN};
   int wayv[]  = {1, 2, 4, 8};
   int linev[] = {16, 32, 64};
   for (unsigned c = 0; c < sizeof caps / sizeof *caps; c++)
@@ -191,7 +196,7 @@ int main(int argc, char **argv)
         if (sets < 1) continue;
         SETS = sets; WAYS = wayv[w]; LINE = linev[l];
         if (!alloc_cache()) continue;
-        run_all(1);
+        bad |= run_all(1);
       }
-  return 0;
+  return bad;
 }

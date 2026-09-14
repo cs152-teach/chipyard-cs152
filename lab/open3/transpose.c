@@ -17,19 +17,24 @@
 
 extern int printf(const char *, ...);
 
-int32_t A[N * N];
-int32_t B[N * N];
+int32_t A[N * N] __attribute__((aligned(MATRIX_ALIGN)));
+int32_t B[N * N] __attribute__((aligned(MATRIX_ALIGN)));
 
 static volatile int32_t sink;
 
+/* Fills A only.  B is set by poison_B() before every kernel. */
 static void fill(void)
 {
   uint32_t s = 0x152Cu;
   for (int k = 0; k < N * N; k++) {
     s ^= s << 13; s ^= s >> 17; s ^= s << 5;
     A[k] = (int32_t)s;
-    B[k] = 0;
   }
+}
+
+static void poison_B(void)
+{
+  for (int k = 0; k < N * N; k++) B[k] = B_POISON;
 }
 
 static int check(void)
@@ -50,6 +55,7 @@ static void flush_and_wait(void)
 
 static int run(const char *name, void (*kernel)(void))
 {
+  poison_B();
   flush_and_wait();
   cs152_ctr_wr(CS152_CTR_CONTROL, CS152_CTL_ZERO);
   kernel();

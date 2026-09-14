@@ -39,4 +39,5 @@ conda-reqs/chipyard-base.yaml.bak
 # not in the student repository -- and it makes `git add -A` safe.
 staff/
 generators/chipyard/src/main/scala/cs152/CS152MysteryConfigs.scala
+generators/chipyard/src/main/scala/cs152/CS152SolutionConfigs.scala
 lib/mystery*.jar
