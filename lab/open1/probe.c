@@ -32,6 +32,23 @@ static void build_chase(unsigned int n, unsigned int strideBytes)
 {
   unsigned int step = strideBytes >> 2;
   unsigned int i, cur = 0, next;
+
+  /* The ring has to fit in BUF.  Past the end of the cacheable range the
+     stores leave the tile and trip a TileLink monitor assertion deep inside
+     Sodor, which says nothing about the call that caused it -- so check here
+     and name the numbers instead. */
+  if (strideBytes < 4 || (strideBytes & (strideBytes - 1)) != 0) {
+    printf("build_chase: stride %u B must be a power of two, at least 4\n",
+           strideBytes);
+    exit(1);
+  }
+  if (n == 0 || n > BUF_BYTES / strideBytes) {
+    printf("build_chase: %u nodes x %u B = %u KiB does not fit the %u KiB buffer"
+           " (max %u nodes at this stride)\n",
+           n, strideBytes, (n * strideBytes) >> 10, (unsigned)(BUF_BYTES >> 10),
+           (unsigned)(BUF_BYTES / strideBytes));
+    exit(1);
+  }
   for (i = 0; i < n; i++) {
     next = cur + step;
     if (i == n - 1) next = 0;
