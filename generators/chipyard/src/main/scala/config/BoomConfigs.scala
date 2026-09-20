@@ -133,16 +133,34 @@ class SimBlockDeviceMegaBoomV4Config extends Config(
   new chipyard.config.AbstractConfig)
 
 // CS152 Lab 3
-// The WithNCS152{Baseline,Default}Booms fragments live upstream in boom.v3.common;
-// WithNCS152SmallBooms is hoisted into the superproject (see CS152BoomConfigs.scala)
-// so this branch can track upstream boom by pointer.
-class CS152BaselineBoomConfig extends Config(
-  new boom.v3.common.WithNCS152BaselineBooms(1) ++
+// All three WithNCS152*Booms fragments are hoisted into the superproject (see
+// CS152BoomConfigs.scala) so this branch tracks upstream boom by pointer; the BPD
+// mixins (WithSWBPD/WithBoom2BPD) do live upstream in boom.v3.common.
+// Directed sweep (Problem 3.3): four named design points, built in parallel.
+//   worst-case -> +64 PRF -> +16 ROB -> +branch prediction (BTB/BHT/8-entry RAS)
+class CS152BaselineBoomConfig extends Config(               // worst-case baseline
+  new chipyard.WithNCS152BaselineBooms(1) ++
+  new chipyard.config.AbstractConfig)
+
+class CS152Baseline64PRFBoomConfig extends Config(          // + 64 physical registers
+  new chipyard.WithNCS152BaselineBooms(1,
+    baselineIntPhysRegisters = 64) ++
+  new chipyard.config.AbstractConfig)
+
+class CS152Baseline16ROBBoomConfig extends Config(          // + 16-entry ROB
+  new chipyard.WithNCS152BaselineBooms(1,
+    baselineIntPhysRegisters = 64, baselineRobEntries = 16) ++
+  new chipyard.config.AbstractConfig)
+
+class CS152BaselineBPredBoomConfig extends Config(          // + branch prediction, 8-entry RAS
+  new chipyard.WithNCS152BaselineBooms(1,
+    baselineIntPhysRegisters = 64, baselineRobEntries = 16,
+    baselineBranchPrediction = true, baselineRasEntries = 8) ++
   new chipyard.config.AbstractConfig)
 
 class CS152SWPredBoomConfig extends Config(
   new boom.v3.common.WithSWBPD ++
-  new boom.v3.common.WithNCS152DefaultBooms(1) ++
+  new chipyard.WithNCS152DefaultBooms(1) ++
   new chipyard.config.AbstractConfig)
 
 class CS152SmallBoomConfig extends Config(
