@@ -1,0 +1,45 @@
+diff --git a/src/main/scala/v3/common/parameters.scala b/src/main/scala/v3/common/parameters.scala
+index 2f5e1268..dfae3376 100644
+--- a/src/main/scala/v3/common/parameters.scala
++++ b/src/main/scala/v3/common/parameters.scala
+@@ -102,6 +102,7 @@ case class BoomCoreParams(
+   /* debug stuff */
+   enableCommitLogPrintf: Boolean = false,
+   enableBranchPrintf: Boolean = false,
++  enableDispatchPrintf: Boolean = false,
+   enableMemtracePrintf: Boolean = false
+ 
+ // DOC include end: BOOM Parameters
+@@ -293,6 +294,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
+   // Debug printout parameters
+   val COMMIT_LOG_PRINTF   = boomParams.enableCommitLogPrintf // dump commit state, for comparision against ISA sim
+   val BRANCH_PRINTF       = boomParams.enableBranchPrintf // dump branch predictor results
++  val DISPATCH_PRINTF     = boomParams.enableDispatchPrintf // dump dispatch trace
+   val MEMTRACE_PRINTF     = boomParams.enableMemtracePrintf // dump trace of memory accesses to L1D for debugging
+ 
+   //************************************
+diff --git a/src/main/scala/v3/exu/core.scala b/src/main/scala/v3/exu/core.scala
+index 751d1cc7..9752c861 100644
+--- a/src/main/scala/v3/exu/core.scala
++++ b/src/main/scala/v3/exu/core.scala
+@@ -1401,6 +1401,20 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
+     debug_ghist := new_ghist
+   }
+ 
++  // CS152 (lab 3, open-ended 2): dump a trace of dispatched instructions. Unlike the
++  // commit log, this includes instructions that are later squashed, so it exposes the
++  // speculative window seen during a Spectre gadget's misspeculation. Enabled via
++  // enableDispatchPrintf on the BOOM core params.
++  if (DISPATCH_PRINTF) {
++    for (w <- 0 until coreWidth) {
++      when (dis_fire(w)) {
++        printf("D 0x%x DASM(%x)\n",
++          Sext(dis_uops(w).debug_pc(vaddrBits-1,0), xLen),
++          Mux(dis_uops(w).is_rvc, dis_uops(w).debug_inst(15,0), dis_uops(w).debug_inst))
++      }
++    }
++  }
++
+   // TODO: Does anyone want this debugging functionality?
+   val coreMonitorBundle = Wire(new CoreMonitorBundle(xLen, fLen))
+   coreMonitorBundle := DontCare

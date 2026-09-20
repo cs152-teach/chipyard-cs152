@@ -2,19 +2,8 @@
 package chipyard.fpga.nexysvideo
 
 import org.chipsalliance.cde.config._
-import freechips.rocketchip.subsystem._
-import freechips.rocketchip.devices.debug._
-import freechips.rocketchip.devices.tilelink._
-import freechips.rocketchip.diplomacy._
-import freechips.rocketchip.system._
-import freechips.rocketchip.tile._
-
-import sifive.blocks.devices.uart._
-import sifive.fpgashells.shell.{DesignKey}
-
-import testchipip.serdes.{SerialTLKey}
-
-import chipyard.{BuildSystem}
+import org.chipsalliance.diplomacy.lazymodule._
+import sifive.fpgashells.shell.DesignKey
 
 // don't use FPGAShell's DesignKey
 class WithNoDesignKey extends Config((site, here, up) => {
@@ -22,18 +11,14 @@ class WithNoDesignKey extends Config((site, here, up) => {
 })
 
 // DOC include start: WithNexysVideoTweaks and Rocket
-class WithNexysVideoTweaks extends Config(
+class WithNexysVideoTweaks(freqMHz: Double = 50) extends Config(
   new WithNexysVideoUARTTSI ++
   new WithNexysVideoDDRTL ++
   new WithNoDesignKey ++
   new testchipip.tsi.WithUARTTSIClient ++
   new chipyard.harness.WithSerialTLTiedOff ++
-  new chipyard.harness.WithHarnessBinderClockFreqMHz(50) ++
-  new chipyard.config.WithMemoryBusFrequency(50.0) ++
-  new chipyard.config.WithFrontBusFrequency(50.0) ++
-  new chipyard.config.WithSystemBusFrequency(50.0) ++
-  new chipyard.config.WithPeripheryBusFrequency(50.0) ++
-  new chipyard.config.WithControlBusFrequency(50.0) ++
+  new chipyard.harness.WithHarnessBinderClockFreqMHz(freqMHz) ++
+  new chipyard.config.WithUniformBusFrequencies(freqMHz) ++
   new chipyard.harness.WithAllClocksFromHarnessClockInstantiator ++
   new chipyard.clocking.WithPassthroughClockGenerator ++
   new chipyard.config.WithNoDebug ++ // no jtag
@@ -72,3 +57,10 @@ class TinyRocketNexysVideoConfig extends Config(
   new chipyard.config.WithBroadcastManager ++ // no l2
   new chipyard.TinyRocketConfig)
   // DOC include end: WithTinyNexysVideoTweaks and Rocket
+
+class BringupNexysVideoConfig extends Config(
+  new WithNexysVideoSerialTLToGPIO ++
+  new WithNexysVideoTweaks(freqMHz = 50) ++
+  new testchipip.serdes.WithSerialTLPHYParams(
+    testchipip.serdes.DecoupledInternalSyncSerialPhyParams(freqMHz = 50)) ++
+  new chipyard.ChipBringupHostConfig)

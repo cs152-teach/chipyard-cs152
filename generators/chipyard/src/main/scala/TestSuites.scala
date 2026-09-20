@@ -3,9 +3,9 @@ package chipyard
 import scala.collection.mutable.{LinkedHashSet}
 
 import freechips.rocketchip.subsystem._
-import freechips.rocketchip.tile.{XLen, TileParams}
+import freechips.rocketchip.tile.{TileParams}
 import org.chipsalliance.cde.config.{Parameters, Field, Config}
-import freechips.rocketchip.system.{TestGeneration, RegressionTestSuite, RocketTestSuite}
+import freechips.rocketchip.system.{TestGeneration, RegressionTestSuite, RocketTestSuite, BenchmarkTestSuite}
 
 /**
  * A set of pre-chosen regression tests
@@ -56,6 +56,18 @@ class TestSuiteHelper
 {
   import freechips.rocketchip.system.DefaultTestSuites._
   import RegressionTestSuites._
+
+  // CS152 (lab 3): `run-bmark-tests` runs the benchmark suites elaborated for the
+  // config. Upstream `benchmarks`/`rv32udBenchmarks` include multithreaded and other
+  // kernels not used by lab 3 (and mt-* need multiple cores). Restrict to the seven
+  // benchmarks reported in the directed portion so the target set matches the lab.
+  // Hoisted here instead of forking rocket-chip's DefaultTestSuites.
+  private val cs152BenchmarkDir = "$(RISCV)/riscv64-unknown-elf/share/riscv-tests/benchmarks"
+  val cs152Benchmarks = new BenchmarkTestSuite("rvi", cs152BenchmarkDir,
+    LinkedHashSet("median", "multiply", "qsort", "towers", "vvadd", "dhrystone"))
+  val cs152RvdBenchmarks = new BenchmarkTestSuite("rvd", cs152BenchmarkDir,
+    LinkedHashSet("spmv"))
+
   val suites = collection.mutable.ListMap[String, RocketTestSuite]()
   def addSuite(s: RocketTestSuite) { suites += (s.makeTargetName -> s) }
   def addSuites(s: Seq[RocketTestSuite]) { s.foreach(addSuite) }
@@ -64,7 +76,7 @@ class TestSuiteHelper
   * Add generic tests (asm, bmark, regression) for all cores.
   */
   def addGenericTestSuites(tiles: Seq[TileParams])(implicit p: Parameters) = {
-    val xlen = p(XLen)
+    val xlen = p(MaxXLen)
     tiles.find(_.tileId == 0).map { tileParams =>
       val coreParams = tileParams.core
       val vm = coreParams.useVM
@@ -77,7 +89,7 @@ class TestSuiteHelper
           if (cfg.minFLen <= 16)
             addSuites(env.map(rv32uzfh))
         } else {
-          addSuite(rv32udBenchmarks)
+          addSuite(cs152RvdBenchmarks)
           addSuites(env.map(rv64uf))
           if (cfg.fLen >= 64)
             addSuites(env.map(rv64ud))
@@ -95,11 +107,14 @@ class TestSuiteHelper
       val (rvi, rvu) =
         if (xlen == 64) ((if (vm) rv64i else rv64pi), (if (coreParams.mulDiv.isDefined) rv64u else List(rv64ui)))
         else            ((if (vm) rv32i else rv32pi), (if (coreParams.mulDiv.isDefined) rv32u else List(rv32ui)))
+      if (coreParams.useZba) addSuites(env.map(if (xlen == 64) rv64uzba else rv32uzba))
+      if (coreParams.useZbb) addSuites(env.map(if (xlen == 64) rv64uzbb else rv32uzbb))
+      if (coreParams.useZbs) addSuites(env.map(if (xlen == 64) rv64uzbs else rv32uzbs))
 
       addSuites(rvi.map(_("p")))
       addSuites(rvu.map(_("p")))
       addSuites((if (vm) List("v") else List()).flatMap(env => rvu.map(_(env))))
-      addSuite(benchmarks)
+      addSuite(cs152Benchmarks)
       addSuite(new RegressionTestSuite(if (xlen == 64) rv64RegrTestNames else rv32RegrTestNames))
     }
   }

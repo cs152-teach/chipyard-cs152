@@ -16,7 +16,6 @@ dependencies:
     - constructor
 
     # misc
-    - pre-commit
     - readline
 
     # firemarshal deps
@@ -26,11 +25,11 @@ dependencies:
     - doit>=0.34.0
     - gitpython
     - humanfriendly
-    - ctags
+    - universal-ctags
     - bison
     - flex
     - expat
-    - python>=3.9
+    - python>=3.9,<3.11
     - bc
     - unzip
     - patch
@@ -64,13 +63,22 @@ dependencies:
     - graphviz
     - expect
 
+    # zephyr deps
+    - ninja
+    - gperf
+    - ccache
+    - dtc
+    - west
+    - pyelftools
+
     # clang-format for driver coding style enforcement.
     - clang-format
     - clang-tools
 
     # hammer packages
     - sty
-    - open_pdks.sky130a
+    # - open_pdks.sky130a
+    - pydantic<2 # for hammer compatibility
     - pip:
         - hammer-vlsi[asap7]==1.2.0
 
@@ -81,7 +89,7 @@ dependencies:
     # packages so that the environment is consistent
     - screen
     - elfutils
-    - libdwarf-dev==0.0.0.20190110_28_ga81397fc4 # from ucb-bar channel - using mainline libdwarf-feedstock
+    - conda-forge::libdwarf-dev=2.1.0.*
     - colorama
     - argcomplete
     - python-graphviz
@@ -119,3 +127,4 @@ dependencies:
     - fsspec
     - pip:
         - fab-classic>=1.19.2
+        - bcrypt<4.0.0
