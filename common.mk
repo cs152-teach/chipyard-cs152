@@ -468,25 +468,6 @@ run-spectre-debug:
 	$(MAKE) CONFIG=CS152SmallBoomConfig run-binary-debug TIMEOUT_CYCLES=200000000 BINARY=$(base_dir)/lab/open2/pk-spectre LOADMEM=1 BINARY_ARGS=$(base_dir)/lab/open2/spectre.riscv
 
 #########################################################################################
-# CS152 (lab 3, directed): run the seven lab-3 benchmarks one at a time through
-# run-binary (which passes +loadmem and +verbose), so each produces <bench>.log with
-# the cycle/retired-instruction counts and <bench>.out with the branch-prediction
-# accuracy summary. Use this instead of the stock run-bmark-tests, whose generated
-# %.out recipe runs each benchmark without +loadmem/+verbose.
-#   make CONFIG=<config> run-cs152-bmarks
-#########################################################################################
-CS152_BMARKS := dhrystone median multiply qsort spmv towers vvadd
-CS152_BMARK_DIR := $(RISCV)/riscv64-unknown-elf/share/riscv-tests/benchmarks
-.PHONY: run-cs152-bmarks
-run-cs152-bmarks:
-	$(require_riscv)
-	@for b in $(CS152_BMARKS); do \
-	  echo "=== $$b ($(CONFIG)) ==="; \
-	  $(MAKE) --no-print-directory CONFIG=$(CONFIG) run-binary LOADMEM=1 \
-	    BINARY=$(CS152_BMARK_DIR)/$$b.riscv || exit 1; \
-	done
-
-#########################################################################################
 # run assembly/benchmarks rules
 #########################################################################################
 RISCV_TESTS_ISA_DIR = $(RISCV)/riscv64-unknown-elf/share/riscv-tests/isa
@@ -590,8 +571,14 @@ endif
 $(output_dir)/%.run: $(output_dir)/% $(SIM_PREREQ)
 	(set -o pipefail && $(NUMA_PREFIX) $(sim) $(PERMISSIVE_ON) $(call get_common_sim_flags,$<) $(PERMISSIVE_OFF)  $< </dev/null | tee $<.log) && touch $@
 
+# CS152 (lab 3): back-door load the ELF (+loadmem) and enable +verbose. Without
+# +loadmem the benchmark is loaded serially over TSI/fesvr, which does not finish in a
+# reasonable number of cycles on these BOOM configs; without +verbose there is no
+# branch trace for the branch-prediction analyzer. (Upstream's get_common_sim_flags
+# omits both, which is why the stock run-bmark-tests neither completes nor reports
+# accuracy here.)
 $(output_dir)/%.out: $(output_dir)/% $(SIM_PREREQ)
-	(set -o pipefail && $(NUMA_PREFIX) $(sim) $(PERMISSIVE_ON) $(call get_common_sim_flags,$<) $(PERMISSIVE_OFF) $< </dev/null 2> >(spike-dasm | $(boom_bpd_script) > $@) | tee $<.log)
+	(set -o pipefail && $(NUMA_PREFIX) $(sim) $(PERMISSIVE_ON) $(call get_common_sim_flags,$<) +loadmem=$< $(VERBOSE_FLAGS) $(PERMISSIVE_OFF) $< </dev/null 2> >(spike-dasm | $(boom_bpd_script) > $@) | tee $<.log)
 
 #######################################
 # Rules for building DRAMSim2 library
