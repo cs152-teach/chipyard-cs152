@@ -18,8 +18,10 @@
 // patches/boom-dispatch-printf.patch (applied by build-setup.sh). After setup you may
 // add `enableDispatchPrintf = true` to WithNCS152SmallBooms below and rebuild.
 //
-// The lines marked "CS152: Change me" are the ones students edit for the directed
-// sweep (WithNCS152BaselineBooms) and for the open-ended problems.
+// Students do not normally edit this file: the directed sweep is driven by the four
+// named CS152Baseline* configs in BoomConfigs.scala, and the open-ended problems use
+// the fixed CS152SWPred/CS152Small configs (editing predictor_sw.cc / spectre.c).
+// These parameters are exposed only for reference and optional experimentation.
 //******************************************************************************
 
 package chipyard
@@ -32,19 +34,16 @@ import freechips.rocketchip.tile._
 import boom.v3.common._
 import boom.v3.exu._
 
-// A shared icache that matches the 64-bit dcache rowBits used by all three configs.
-// Defined once so BoomTile's rowBits requirement is satisfied.
-
 /** Directed portion: worst-case 1-wide BOOM. The performance-bottleneck sweep is
   * parameterized (PRF, ROB, branch prediction, RAS) so the four design points are
   * separate named configs (see BoomConfigs.scala) that build in parallel -- mirroring
   * the fa26-lab2 associativity sweep. Defaults are the worst-case baseline. */
 class WithNCS152BaselineBooms(
     n: Int = 1,
-    baselineIntPhysRegisters: Int = 33,      // CS152 sweep knob (worst-case default)
-    baselineRobEntries: Int = 4,             // CS152 sweep knob
-    baselineBranchPrediction: Boolean = false, // CS152 sweep knob
-    baselineRasEntries: Int = 0              // CS152 sweep knob
+    baselineIntPhysRegisters: Int = 33,
+    baselineRobEntries: Int = 4,
+    baselineBranchPrediction: Boolean = false,
+    baselineRasEntries: Int = 0
   ) extends Config(
   new boom.v3.common.WithTAGELBPD ++ // BPD hardware; only used when enableBranchPrediction=true
   new Config((site, here, up) => {
@@ -52,17 +51,17 @@ class WithNCS152BaselineBooms(
       val prev = up(TilesLocated(InSubsystem), site)
       val idOffset = up(NumTiles)
       (0 until n).map { i =>
-        val coreWidth = 1                     // CS152: Change me (1 to 4)
-        val memWidth = 1                      // CS152: Change me (1 or 2)
+        val coreWidth = 1
+        val memWidth = 1
         BoomTileAttachParams(
           tileParams = BoomTileParams(
             core = BoomCoreParams(
-              fetchWidth = 4,                   // CS152: Change me (4 or 8)
+              fetchWidth = 4,
               numRobEntries = baselineRobEntries,
               numIntPhysRegisters = baselineIntPhysRegisters,
-              numLdqEntries = 8,                // CS152: Change me (2+)
-              numStqEntries = 8,                // CS152: Change me (2+)
-              maxBrCount = 8,                   // CS152: Change me (2+)
+              numLdqEntries = 8,
+              numStqEntries = 8,
+              maxBrCount = 8,
               enableBranchPrediction = baselineBranchPrediction,
               numRasEntries = baselineRasEntries,
 
@@ -102,20 +101,20 @@ class WithNCS152DefaultBooms(n: Int = 1) extends Config(
       val prev = up(TilesLocated(InSubsystem), site)
       val idOffset = up(NumTiles)
       (0 until n).map { i =>
-        val coreWidth = 3                     // CS152: Change me (1 to 4)
-        val memWidth = 1                      // CS152: Change me (1 or 2)
-        val nIssueSlots = 32                  // CS152: Change me (2+)
+        val coreWidth = 3
+        val memWidth = 1
+        val nIssueSlots = 32
         BoomTileAttachParams(
           tileParams = BoomTileParams(
             core = BoomCoreParams(
-              fetchWidth = 4,                   // CS152: Change me (4 or 8)
-              numRobEntries = 96,               // CS152: Change me (2+)
-              numIntPhysRegisters = 96,         // CS152: Change me (33+)
-              numLdqEntries = 16,               // CS152: Change me (2+)
-              numStqEntries = 16,               // CS152: Change me (2+)
-              maxBrCount = 12,                  // CS152: Change me (2+)
-              enableBranchPrediction = true,    // CS152: Change me
-              numRasEntries = 16,               // CS152: Change me
+              fetchWidth = 4,
+              numRobEntries = 96,
+              numIntPhysRegisters = 96,
+              numLdqEntries = 16,
+              numStqEntries = 16,
+              maxBrCount = 12,
+              enableBranchPrediction = true,
+              numRasEntries = 16,
 
               // DO NOT CHANGE BELOW
               enableBranchPrintf = true,
@@ -153,21 +152,21 @@ class WithNCS152SmallBooms(n: Int = 1) extends Config(
       val prev = up(TilesLocated(InSubsystem), site)
       val idOffset = up(NumTiles)
       (0 until n).map { i =>
-        val coreWidth = 1                     // CS152: Change me (1 to 4)
-        val memWidth = 1                      // CS152: Change me (1 or 2)
-        val nIssueSlots = 8                   // CS152: Change me (2+)
+        val coreWidth = 1
+        val memWidth = 1
+        val nIssueSlots = 8
         BoomTileAttachParams(
           tileParams = BoomTileParams(
             core = BoomCoreParams(
-              fetchWidth = 4,                   // CS152: Change me (4 or 8)
-              numRobEntries = 32,               // CS152: Change me (2+)
-              numIntPhysRegisters = 52,         // CS152: Change me (33+)
-              numFpPhysRegisters = 48,          // CS152: Change me (33+)
-              numLdqEntries = 8,                // CS152: Change me (2+)
-              numStqEntries = 8,                // CS152: Change me (2+)
-              maxBrCount = 8,                   // CS152: Change me (2+)
-              enableBranchPrediction = true,    // CS152: Change me
-              numRasEntries = 16,               // CS152: Change me
+              fetchWidth = 4,
+              numRobEntries = 32,
+              numIntPhysRegisters = 52,
+              numFpPhysRegisters = 48,
+              numLdqEntries = 8,
+              numStqEntries = 8,
+              maxBrCount = 8,
+              enableBranchPrediction = true,
+              numRasEntries = 16,
 
               // DO NOT CHANGE BELOW
               enableBranchPrintf = true,
