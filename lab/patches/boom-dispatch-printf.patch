@@ -19,17 +19,14 @@ index 2f5e1268..dfae3376 100644
  
    //************************************
 diff --git a/src/main/scala/v3/exu/core.scala b/src/main/scala/v3/exu/core.scala
-index 751d1cc7..9752c861 100644
+index 751d1cc7..b136681a 100644
 --- a/src/main/scala/v3/exu/core.scala
 +++ b/src/main/scala/v3/exu/core.scala
-@@ -1401,6 +1401,20 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
+@@ -1401,6 +1401,17 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
      debug_ghist := new_ghist
    }
  
-+  // CS152 (lab 3, open-ended 2): dump a trace of dispatched instructions. Unlike the
-+  // commit log, this includes instructions that are later squashed, so it exposes the
-+  // speculative window seen during a Spectre gadget's misspeculation. Enabled via
-+  // enableDispatchPrintf on the BOOM core params.
++  // CS152 (lab 3): trace dispatched instructions (enable via enableDispatchPrintf).
 +  if (DISPATCH_PRINTF) {
 +    for (w <- 0 until coreWidth) {
 +      when (dis_fire(w)) {

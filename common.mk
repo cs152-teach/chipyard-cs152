@@ -331,10 +331,8 @@ verilog: $(sim_common_files)
 #########################################################################################
 # helper rules to run simulations
 #########################################################################################
-# CS152 (lab 3): post-process the disassembled trace through the BOOM branch-predictor
-# analyzer, which summarizes branch-prediction accuracy at the end of each ".out". The
-# script ships with the (upstream) boom submodule. boom_bpd_count is the number of most-
-# frequently-mispredicted branch sites to report.
+# CS152 (lab 3): branch-prediction accuracy analyzer; appends a misprediction summary
+# to each ".out". boom_bpd_count = number of top mispredicted branches to list.
 boom_bpd_count := 20
 boom_bpd_script := python3 $(base_dir)/lab/branch-processor.py -v - $(boom_bpd_count)
 
@@ -454,13 +452,11 @@ run-binary-fast-hex: $(BINARY).run.fast
 run-binary-fast-hex: override SIM_FLAGS += +loadmem=$(BINARY)
 
 #########################################################################################
-# CS152 (lab 3, open-ended 2): run the Spectre attack. Loads the prebuilt pk-spectre
-# (the victim proxy kernel with the vulnerable sys_leak gadget) and passes the user-mode
-# attacker (spectre.riscv) as its argument. See lab/open2/.
+# CS152 (lab 3, open-ended 2): run the Spectre attack (prebuilt pk-spectre victim +
+# your spectre.riscv attacker). See lab/open2/. High timeout so a full 128-byte leak
+# is not cut off.
 #########################################################################################
 .PHONY: run-spectre run-spectre-debug
-# A full 128-byte leak needs well over the default 10M-cycle timeout, so raise it here
-# (the program exits as soon as it finishes, so this is only a ceiling).
 run-spectre:
 	$(MAKE) CONFIG=CS152SmallBoomConfig run-binary TIMEOUT_CYCLES=200000000 BINARY=$(base_dir)/lab/open2/pk-spectre LOADMEM=1 BINARY_ARGS=$(base_dir)/lab/open2/spectre.riscv
 
@@ -571,12 +567,8 @@ endif
 $(output_dir)/%.run: $(output_dir)/% $(SIM_PREREQ)
 	(set -o pipefail && $(NUMA_PREFIX) $(sim) $(PERMISSIVE_ON) $(call get_common_sim_flags,$<) $(PERMISSIVE_OFF)  $< </dev/null | tee $<.log) && touch $@
 
-# CS152 (lab 3): back-door load the ELF (+loadmem) and enable +verbose. Without
-# +loadmem the benchmark is loaded serially over TSI/fesvr, which does not finish in a
-# reasonable number of cycles on these BOOM configs; without +verbose there is no
-# branch trace for the branch-prediction analyzer. (Upstream's get_common_sim_flags
-# omits both, which is why the stock run-bmark-tests neither completes nor reports
-# accuracy here.)
+# CS152 (lab 3): back-door load the ELF (+loadmem) and enable +verbose, so benchmarks
+# run and emit the branch trace the accuracy analyzer needs.
 $(output_dir)/%.out: $(output_dir)/% $(SIM_PREREQ)
 	(set -o pipefail && $(NUMA_PREFIX) $(sim) $(PERMISSIVE_ON) $(call get_common_sim_flags,$<) +loadmem=$< $(VERBOSE_FLAGS) $(PERMISSIVE_OFF) $< </dev/null 2> >(spike-dasm | $(boom_bpd_script) > $@) | tee $<.log)
 

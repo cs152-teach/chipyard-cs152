@@ -210,10 +210,8 @@ $(sim): $(model_mk) $(dramsim_lib)
 	$(require_riscv)
 	$(MAKE) VM_PARALLEL_BUILDS=1 -C $(model_dir) -f V$(TB).mk
 
-# CS152 (lab 3, open-ended 1): after editing a C++ resource such as the branch
-# predictor model (generators/boom/src/main/resources/csrc/predictor_sw.cc), rebuild
-# the simulator without re-elaborating Chisel. Copies the updated csrc into the
-# generated collateral and relinks the verilator model (a few seconds).
+# CS152 (lab 3): rebuild the simulator after editing a C++ resource (e.g.
+# predictor_sw.cc) without re-elaborating Chisel.
 #   make CONFIG=CS152SWPredBoomConfig rebuild-csrc
 .PHONY: rebuild-csrc
 rebuild-csrc: $(dramsim_lib)

@@ -258,10 +258,8 @@ if run_step "2"; then
     $CYDIR/scripts/init-submodules-no-riscv-tools.sh --full
     exit_if_last_command_failed
 
-    # CS152 (lab 3): apply the local BOOM patches. The boom submodule is pinned to
-    # upstream (so merges from main stay fast-forward-clean); these patches add the
-    # enableDispatchPrintf dispatch trace used to debug the Spectre open-ended problem.
-    # Idempotent: skip a patch that is already applied.
+    # CS152 (lab 3): apply local BOOM patches (the enableDispatchPrintf dispatch trace
+    # for the Spectre problem). Idempotent: skip a patch that is already applied.
     for patch in $CYDIR/lab/patches/*.patch; do
         [ -e "$patch" ] || continue
         pdir="$CYDIR/generators/boom"
