@@ -262,7 +262,7 @@ if run_step "2"; then
     # upstream (so merges from main stay fast-forward-clean); these patches add the
     # enableDispatchPrintf dispatch trace used to debug the Spectre open-ended problem.
     # Idempotent: skip a patch that is already applied.
-    for patch in $CYDIR/patches/*.patch; do
+    for patch in $CYDIR/lab/patches/*.patch; do
         [ -e "$patch" ] || continue
         pdir="$CYDIR/generators/boom"
         if git -C "$pdir" apply --check --reverse "$patch" >/dev/null 2>&1; then

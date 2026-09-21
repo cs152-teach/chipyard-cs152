@@ -336,7 +336,7 @@ verilog: $(sim_common_files)
 # script ships with the (upstream) boom submodule. boom_bpd_count is the number of most-
 # frequently-mispredicted branch sites to report.
 boom_bpd_count := 20
-boom_bpd_script := python3 $(base_dir)/scripts/branch-processor.py -v - $(boom_bpd_count)
+boom_bpd_script := python3 $(base_dir)/lab/branch-processor.py -v - $(boom_bpd_count)
 
 .PHONY: run-binary run-binary-fast run-binary-debug run-fast run-asm-tests-fast run-bmark-tests-fast \
 	%.check-exists check-binary check-binaries
