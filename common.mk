@@ -334,7 +334,10 @@ verilog: $(sim_common_files)
 # CS152 (lab 3): branch-prediction accuracy analyzer; appends a misprediction summary
 # to each ".out". boom_bpd_count = number of top mispredicted branches to list.
 boom_bpd_count := 20
-boom_bpd_script := python3 $(base_dir)/lab/branch-processor.py -v - $(boom_bpd_count)
+# BPD_TRACE=<file> additionally records the committed branch trace, for replay
+# through lab/open1 (open-ended 4.1).
+boom_bpd_script := python3 $(base_dir)/lab/branch-processor.py -v - $(boom_bpd_count) \
+                     $(if $(BPD_TRACE),--trace-out $(BPD_TRACE))
 
 .PHONY: run-binary run-binary-fast run-binary-debug run-fast run-asm-tests-fast run-bmark-tests-fast \
 	%.check-exists check-binary check-binaries

@@ -155,8 +155,15 @@ class CS152BaselineBPredBoomConfig extends Config(          // + branch predicti
     baselineBranchPrediction = true, baselineRasEntries = 8) ++
   new chipyard.config.AbstractConfig)
 
-class CS152SWPredBoomConfig extends Config(
+class CS152SWPredBoomConfig extends Config(                 // open-ended 4.1: C++ predictor model
   new boom.v3.common.WithSWBPD ++
+  new chipyard.WithNCS152DefaultBooms(1) ++
+  new chipyard.config.AbstractConfig)
+
+// Same core as CS152SWPredBoomConfig, but with BOOM's hardware TAGE-L predictor
+// (uBTB + BIM + BTB + TAGE + loop) in place of the C++ harness, for comparison.
+class CS152TAGELBoomConfig extends Config(
+  new boom.v3.common.WithTAGELBPD ++
   new chipyard.WithNCS152DefaultBooms(1) ++
   new chipyard.config.AbstractConfig)
 

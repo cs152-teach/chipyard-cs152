@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 
 parser = argparse.ArgumentParser(description='BOOM branch trace analyzer')
@@ -9,9 +10,18 @@ parser.add_argument('file', nargs='?', type=argparse.FileType('r'),
                     help='workload.out file')
 parser.add_argument('n', nargs='?', type=int, default=1,
                     help='number of branches to print')
+parser.add_argument('--trace-out', metavar='FILE', default=None,
+                    help='also write the committed branch trace to FILE, one '
+                         '"<pc> <taken> <type>" record per line, for offline replay')
 
 args = parser.parse_args()
 n = args.n
+if args.trace_out:
+    trace_dir = os.path.dirname(os.path.abspath(args.trace_out))
+    os.makedirs(trace_dir, exist_ok=True)
+    trace_out = open(args.trace_out, 'w')
+else:
+    trace_out = None
 
 
 class BranchInfo:
@@ -52,6 +62,9 @@ for line in args.file:
         #print(src, taken, addr, label, flush=True)
         mispredicted = (src == '3')  # BSRC_C: branch resolved by the core = mispredicted
         if is_jal != '1':# and int(addr, 16) < 0x80000000:
+            if trace_out:
+                trace_out.write("{} {} {}\n".format(
+                    addr, taken, 'br' if is_br == '1' else 'jalr'))
             if addr not in branches:
                 branches[addr] = BranchInfo(addr, mispredicted, is_br, is_jalr)
             else:
@@ -62,6 +75,9 @@ for line in args.file:
                 ghist = ghist[1:] + taken
     elif args.verbose:
         print(line, end='', flush=True)
+
+if trace_out:
+    trace_out.close()
 
 if not branches:
     sys.exit(0)

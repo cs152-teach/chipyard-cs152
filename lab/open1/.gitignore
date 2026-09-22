@@ -1,1 +1,3 @@
 *.zip
+replay
+traces/*.trace
