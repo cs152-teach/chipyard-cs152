@@ -4,6 +4,8 @@
 #define __UTIL_H
 
 extern void setStats(int enable);
+extern void printStats(int ncores);
+extern void __attribute__((noreturn)) finish(int ret);
 
 
 int  printf(const char* fmt, ...);
@@ -47,25 +49,10 @@ static int verifyDouble(int n, const volatile double* test, const double* verify
   return 0;
 }
 
-static void __attribute__((noinline)) barrier(int ncores)
-{
-  static volatile int sense;
-  static volatile int count;
-  static __thread int threadsense;
-
-  __sync_synchronize();
-
-  threadsense = !threadsense;
-  if (__sync_fetch_and_add(&count, 1) == ncores-1)
-  {
-    count = 0;
-    sense = threadsense;
-  }
-  else while(sense != threadsense)
-    ;
-
-  __sync_synchronize();
-}
+/* Barrier for cores [0, ncores), built from plain loads and stores because
+   Sodor has no atomic instructions (no A extension); see syscalls.c.  Every
+   core in [0, ncores) must call it. */
+extern void barrier(int ncores);
 
 static uint64_t lfsr(uint64_t x)
 {

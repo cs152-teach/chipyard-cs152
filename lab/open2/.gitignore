@@ -1,5 +1,0 @@
-*.riscv
-*.dump
-.run/
-pf-eval
-pf-eval-*

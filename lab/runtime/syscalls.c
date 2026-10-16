@@ -34,96 +34,147 @@ static uintptr_t syscall(uintptr_t which, uint64_t arg0, uint64_t arg1, uint64_t
   return magic_mem[0];
 }
 
-#define NUM_COUNTERS 16
-static uintptr_t counters[NUM_COUNTERS];
-static char* counter_names[NUM_COUNTERS] = {
-  "",
-  "",
-  "loads",
-  "stores",
-  "I$ miss",
-  "D$ regular miss",
-  "D$ prefetch miss",
-  "D$ release",
-  "ITLB miss",
-  "DTLB miss",
-  "L2 TLB miss",
-  "branches",
-  "mispredicts",
-  "load-use interlock",
-  "I$ blocked",
-  "D$ blocked",
+/* Sodor has no hardware performance-monitor CSRs (mhpmcounter*).  The L1D
+   counters live in an MMIO block instead, one per core; see cs152_counters.h.
+
+     setStats(1)       this core: flush its L1D, then zero and start its counters
+     setStats(0)       this core: stop its counters and save a copy of them
+     printStats(nc)    every core calls it; core 0 prints the table
+
+   The copies live in memory so that core 0 can print every core's numbers:
+   printf goes through tohost, which only one core at a time may use. */
+
+/* crt.S parks any hart at or beyond the core count, so every mhartid that
+   gets here indexes arrays of CS152_MAX_CORES safely. */
+
+/* One table row per counter.  instret comes from the core's CSR, not the
+   counter block. */
+#define CS152_INSTRET 0xff
+static const struct { const char *name; unsigned char off, total; } cs152_rows[] = {
+  { "cycles",        CS152_CTR_CYCLES,     0 },
+  { "instret",       CS152_INSTRET,        1 },
+  { "loads",         CS152_CTR_LOADS,      1 },
+  { "stores",        CS152_CTR_STORES,     1 },
+  { "hits",          CS152_CTR_HITS,       1 },
+  { "load misses",   CS152_CTR_LOADMISS,   1 },
+  { "store misses",  CS152_CTR_STOREMISS,  1 },
+  { "upgrades",      CS152_CTR_UPGRADES,   1 },
+  { "writebacks",    CS152_CTR_WRITEBACKS, 1 },
+  { "invalidations", CS152_CTR_INVALS,     1 },
+  { "interventions", CS152_CTR_INTERVENE,  1 },
+  { "bus-wait cyc",  CS152_CTR_BUSWAIT,    1 },
 };
+#define CS152_NROWS (sizeof(cs152_rows) / sizeof(cs152_rows[0]))
 
-#define HPM_EVENTSET_BITS       8
-#define HPM_EVENTSET_MASK       ((1U << HPM_EVENTSET_BITS) - 1)
-#define HPM_EVENT(event, set)   ((1U << ((event) + HPM_EVENTSET_BITS)) | ((set) & HPM_EVENTSET_MASK))
-
-/* CS152: replaced.  The original drove Rocket's hardware performance monitor
-   (mhpmevent3.., hpmcounter3..), which Sodor does not have -- nPerfCounters = 0
-   and every event is hard-disabled (sodor_internal_tile.scala:21), so those CSR
-   accesses trap.  The L1D counters live in an MMIO block instead; see
-   cs152_counters.h.
-
-   Semantics are unchanged from the benchmark's point of view: setStats(1)
-   starts a region of interest, setStats(0) ends it and prints the deltas.  That
-   is what keeps the benchmark's own setup, its verification pass, and all HTIF
-   traffic out of the measurement. */
-
+/* One cache line (or more) per core, so the copies do not false-share. */
+struct cs152_stats { unsigned int v[CS152_NROWS]; } __attribute__((aligned(64)));
+static struct cs152_stats cs152_stats[CS152_MAX_CORES];
+static __thread unsigned long cs152_instret0;
 static volatile unsigned int cs152_flush_scratch;
 
 void setStats(int enable)
 {
   if (enable) {
-    /* Flush first so the region starts from a known cache state -- without it
-       the measurement inherits whatever the setup code left behind.  The flush
-       is asynchronous, so touch cacheable memory to wait for the walk.  Do NOT
-       fold these into one write: the walk's writebacks would land in the
-       just-zeroed counter. */
+    /* Flush first so the region starts from a known (empty) cache state.
+       The flush is asynchronous; the load from cacheable memory waits for it
+       to finish.  FLUSH and ZERO are separate writes so that the flush's
+       writebacks are not counted in the region. */
     cs152_ctr_wr(CS152_CTR_CONTROL, CS152_CTL_FLUSH);
     (void)cs152_flush_scratch;
     cs152_ctr_wr(CS152_CTR_CONTROL, CS152_CTL_ZERO);   /* zero, and start */
+    cs152_instret0 = read_csr(minstret);
     return;
   }
 
-  /* Freeze the counters before reading any of them.  This is an MMIO store on
-     the counter port, so the cache never sees it and it is not counted.  Once
-     frozen, every counter describes the same instant and it no longer matters
-     where the compiler schedules its register spills -- which is why the reads
-     below can be interleaved with the printfs instead of hoisted above them. */
+  /* Stop first, then read, so every counter describes the same instant and
+     the stores below (to cacheable memory) are not counted. */
   cs152_ctr_wr(CS152_CTR_CONTROL, CS152_CTL_STOP);
+  unsigned long instret = read_csr(minstret) - cs152_instret0;
 
-  unsigned int magic = cs152_ctr_rd(CS152_CTR_MAGIC);
-  if (magic == CS152_CTR_MAGIC_MYSTERY) {
-    printf("=== CS152 L1D counters (mystery build: cycles only) ===\n");
-    printf("  cycles      : %d\n", cs152_ctr_rd(CS152_CTR_CYCLES));
+  unsigned int *v = cs152_stats[read_csr(mhartid)].v;
+  for (unsigned r = 0; r < CS152_NROWS; r++)
+    v[r] = cs152_rows[r].off == CS152_INSTRET ? instret : cs152_ctr_rd(cs152_rows[r].off);
+}
+
+void printStats(int nc)
+{
+  barrier(nc);                       /* every core has its copy in place */
+  if (read_csr(mhartid) != 0)
     return;
-  }
-  if (magic != CS152_CTR_MAGIC_VALUE) {
-    /* Expected under spike, which has no counter hardware; a real problem on
-       the simulator, where it means the two base addresses disagree. */
+
+  if (cs152_ctr_rd(CS152_CTR_MAGIC) != CS152_CTR_MAGIC_VALUE) {
+    /* Expected under spike, which has no counter hardware.  On the RTL
+       simulator it means CS152_CTR_BASE does not match the hardware. */
     printf("CS152: no counter block at 0x%x -- no counters for this run.\n",
            (unsigned int)CS152_CTR_BASE);
-    printf("       Expected under spike.  On the simulator it means\n"
-           "       CS152_CTR_BASE (cs152_counters.h) and CS152CounterBase\n"
-           "       (CS152Params.scala) disagree.\n");
     return;
   }
 
-  unsigned int hi   = cs152_ctr_rd(CS152_CTR_HITS);
-  unsigned int mi   = cs152_ctr_rd(CS152_CTR_MISSES);
-  unsigned int acc  = hi + mi;
-
   printf("=== CS152 L1D counters (region of interest, D-side only) ===\n");
-  printf("  cycles      : %d\n", cs152_ctr_rd(CS152_CTR_CYCLES));
-  printf("  loads       : %d\n", cs152_ctr_rd(CS152_CTR_LOADS));
-  printf("  stores      : %d\n", cs152_ctr_rd(CS152_CTR_STORES));
-  printf("  hits        : %d\n", hi);
-  printf("  misses      : %d\n", mi);
-  printf("  writebacks  : %d\n", cs152_ctr_rd(CS152_CTR_WRITEBACKS));
-  if (acc)
-    printf("  miss rate   : %d.%02d %%\n", mi * 100 / acc,
-           (unsigned int)((unsigned long long)mi * 10000 / acc) % 100);
+  printf("  %-14s", "");
+  for (int i = 0; i < nc; i++)
+    printf("     core %d", i);
+  if (nc > 1)
+    printf("      total");
+  printf("\n");
+  for (unsigned r = 0; r < CS152_NROWS; r++) {
+    unsigned int sum = 0;
+    printf("  %-14s", cs152_rows[r].name);
+    for (int i = 0; i < nc; i++) {
+      printf(" %10d", cs152_stats[i].v[r]);
+      sum += cs152_stats[i].v[r];
+    }
+    if (cs152_rows[r].total && nc > 1)
+      printf(" %10d", sum);
+    printf("\n");
+  }
+}
+
+void __attribute__((noreturn)) finish(int ret)
+{
+  /* Print the result on stdout, directly below the counter table, so the run
+     log records it.  ret is verify()'s value: 0 on success, otherwise the
+     1-based position of the first wrong element. */
+  if (ret == 0)
+    printf("*** PASSED ***\n");
+  else
+    printf("*** FAILED *** (first wrong element: %d)\n", ret);
+  exit(ret);
+  __builtin_unreachable();
+}
+
+/* A round-numbered barrier from plain loads and stores (Sodor has no atomics).
+
+   Each core owns one arrival flag and is the only core that ever writes it.
+   Core 0 waits until every other core's flag shows this round, then publishes
+   the round in `release`; the others spin on `release`.  A core cannot run
+   ahead into the next round before core 0 has finished checking this one,
+   because it only leaves after core 0 writes `release`, and core 0 writes it
+   last.
+
+   Correctness needs only coherence plus in-order, one-at-a-time memory
+   operations, which each Sodor core provides.  Each flag is on its own cache
+   line, so the flags do not false-share. */
+struct cs152_flag { volatile int v; } __attribute__((aligned(64)));
+static struct cs152_flag cs152_arrive[CS152_MAX_CORES];
+static struct cs152_flag cs152_release;
+
+void barrier(int ncores)
+{
+  int cid = read_csr(mhartid);
+  int round = cs152_arrive[cid].v + 1;
+
+  if (cid == 0) {
+    for (int i = 1; i < ncores; i++)
+      while (cs152_arrive[i].v != round)
+        ;
+    cs152_arrive[0].v = round;
+    cs152_release.v = round;
+  } else {
+    cs152_arrive[cid].v = round;
+    while (cs152_release.v != round)
+      ;
+  }
 }
 
 void __attribute__((noreturn)) tohost_exit(uintptr_t code)
@@ -182,28 +233,7 @@ void _init(int cid, int nc)
   thread_entry(cid, nc);
 
   // only single-threaded programs should ever get here.
-  int ret = main(0, 0);
-
-  /* CS152: the original dumped the counters[] array here, which setStats()
-     used to fill from Rocket's HPM CSRs.  Sodor has no HPM (nPerfCounters = 0),
-     setStats() now reads the L1D MMIO block instead, and this loop printed 16
-     lines of zeros.  Removed -- the region-of-interest block that setStats(0)
-     prints is the real output. */
-
-  /* CS152: report the verdict ourselves.  The test harness does print one, but
-     only under +verbose -- which run-binary-fast deliberately omits -- and it
-     writes to stderr, which the run rule does not capture.  So the harness
-     verdict reaches neither the log nor, usually, the terminal.  Printing here
-     puts it on stdout, directly below the counter block, which makes a saved
-     log self-certifying: it carries both the geometry it ran and whether the
-     result was right.  main() returns verify()'s value, which is 0 on success
-     and otherwise the 1-based position of the first wrong element. */
-  if (ret == 0)
-    printf("*** PASSED ***\n");
-  else
-    printf("*** FAILED *** (first wrong element: %d)\n", ret);
-
-  exit(ret);
+  finish(main(0, 0));
 }
 
 #undef putchar
@@ -394,7 +424,6 @@ static void vprintfmt(void (*putch)(int, void**), void **putdat, const char *fmt
 
     // (unsigned) octal
     case 'o':
-      // should do something with padding so it's always 3 octits
       base = 8;
       goto unsigned_number;
 
@@ -437,7 +466,7 @@ int printf(const char* fmt, ...)
   vprintfmt((void*)putchar, 0, fmt, ap);
 
   va_end(ap);
-  return 0; // incorrect return value, but who cares, anyway?
+  return 0; // does not return the number of characters printed
 }
 
 int sprintf(char* str, const char* fmt, ...)

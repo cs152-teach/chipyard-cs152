@@ -1,6 +1,7 @@
 # See LICENSE for license details.
 
 #include "encoding.h"
+#include "cs152_counters.h"
 
 #if __riscv_xlen == 64
 # define LREG ld
@@ -121,8 +122,16 @@ _start:
 
   # get core id
   csrr a0, mhartid
-  # for now, assume only 1 core
-  li a1, 1
+  # Read the number of cores from the counter block.  If the magic word does
+  # not match (e.g. under spike, with that window mapped as plain memory),
+  # assume two cores; run spike with -p2.  Harts at or beyond the core count
+  # spin here forever.
+  li t0, CS152_CTR_BASE
+  lw t1, CS152_CTR_MAGIC(t0)
+  li t2, CS152_CTR_MAGIC_VALUE
+  li a1, 2
+  bne t1, t2, 1f
+  lw a1, CS152_CTR_NCORES(t0)
 1:bgeu a0, a1, 1b
 
   # give each core 128KB of stack + TLS

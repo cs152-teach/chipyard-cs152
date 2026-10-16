@@ -1,5 +1,5 @@
 ########################################################################
-# CS152 Lab 2 -- runtime directory
+# CS152 Lab 4 -- runtime directory
 #
 #   make KERNEL=my_probe.c    build my_probe.riscv against the runtime
 #   make clean                remove build outputs
@@ -7,16 +7,17 @@
 # The runtime is not a standalone program; it is linked into a kernel.
 # A problem directory includes runtime.mk rather than using this Makefile.
 #
-# Provenance.  Four files here are unmodified copies of upstream, taken
-# from ucb-bar/esp-tests branch lab2 @ d8fe3bc:
+# Provenance: four files come from ucb-bar/esp-tests branch lab2 @ d8fe3bc:
 #
 #   crt.S util.h    <- benchmarks/common/
 #   link.ld         <- benchmarks/common/test.ld
 #   encoding.h      <- env/            (a nested submodule of that repo)
 #
-# To re-sync them, fetch that submodule and copy the files above.  The
-# other two are ours: syscalls.c is upstream patched for the CS152 MMIO
-# counters, and cs152_counters.h is written for this lab.
+# link.ld and encoding.h are unmodified.  crt.S reads the core count from the
+# counter block and parks extra harts; util.h declares a barrier() built from
+# plain loads and stores (Sodor has no atomics).  syscalls.c is upstream plus
+# the CS152 counter and barrier code, and cs152_counters.h is lab-specific.
+# Keep these changes when re-syncing from upstream.
 ########################################################################
 
 RUNTIME_DIR = .
