@@ -306,11 +306,11 @@ LOADMEM ?=
 LOADARCH ?=
 DUMP_BINARY ?= 1
 
-# CS152: the lab-2 configs pre-load the Sodor scratchpad with $readmemh, and that
+# CS152: the CS152 Sodor configs pre-load the shared memory with $readmemh, and that
 # pre-load only takes effect together with +loadmem -- the flag that stops fesvr
 # writing the program a word at a time over TSI.  Default it on.
 ifeq ($(LOADMEM),)
-ifneq ($(filter CS152Lab2%,$(CONFIG)),)
+ifneq ($(filter CS152%,$(CONFIG)),)
 LOADMEM = 1
 endif
 endif

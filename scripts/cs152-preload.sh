@@ -1,31 +1,29 @@
 #!/bin/bash
-# CS152 Lab 2 -- make a scratchpad pre-load image from a RISC-V ELF.
+# CS152 -- make a memory pre-load image from a RISC-V ELF.
 #
 #   cs152-preload.sh <prog.riscv> [outfile]      default outfile: ./preload.hex
 #
-# The Sodor scratchpad is pre-loaded with $readmemh instead of being written a
-# word at a time over fesvr/TSI, which is most of an RTL run's wall time.  Use
-# it together with +loadmem=<elf> (LOADMEM=1 in the make flow), so fesvr skips
-# the program write:
+# The CS152 configs pre-load the simulated memory with $readmemh rather than
+# having fesvr write the program a word at a time over TSI, which dominates an
+# RTL run's wall time.  The pre-load works together with +loadmem=<elf>, which
+# makes fesvr skip the program write.  For CS152 configs, make sets LOADMEM=1 by
+# default and runs this script automatically, so you rarely need to call it:
 #
-#   cd $(SIMDIR)
-#   ../../scripts/cs152-preload.sh prog.riscv
-#   make CONFIG=CS152Lab2Config run-binary-fast BINARY=prog.riscv LOADMEM=1
+#   make CONFIG=CS152Lab4MSIConfig run-binary-fast BINARY=prog.riscv
 #
-# Two traps this script exists to hide -- see cs152/CS152Params.scala:
+# Two details matter (see generators/chipyard/src/main/scala/cs152/):
 #
-#   * elf2hex's base argument must be DECIMAL.  "0x80000000" silently parses as
-#     0 and elf2hex aborts inside htif_hexwriter.cc.
-#   * every word must be BYTE-SWAPPED.  The scratchpad is Mem(_, Vec(4, UInt(8.W)))
-#     and Chisel's Cat/splitWord reverse the lanes, so Memory[i] holds the word
-#     with its bytes in the opposite order to the value at that address.  Get
-#     this wrong and the core executes nonsense without any error.
+#   * elf2hex's base argument must be decimal; "0x80000000" parses as 0 and
+#     elf2hex aborts.
+#   * every word must be byte-swapped, because the memory's byte lanes are
+#     stored in the opposite order to the value at that address.  An unswapped
+#     image makes the core execute garbage without any error.
 
 set -euo pipefail
 
 BASE_ADDR=2147483648      # 0x80000000, decimal on purpose
 WORD_BYTES=4
-DEPTH=524288              # 2 MiB scratchpad / 4 B -- matches AsyncScratchPadMemory
+DEPTH=524288              # 2 MiB / 4 B -- matches WithCS152MemoryBytes (CS152SodorConfig)
 
 if [ $# -lt 1 ]; then
   echo "usage: $(basename "$0") <prog.riscv> [outfile]" >&2

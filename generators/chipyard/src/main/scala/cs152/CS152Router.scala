@@ -1,12 +1,15 @@
+//**************************************************************************
+// CS152 Lab 4 -- per-core D-port router
+//--------------------------------------------------------------------------
+//
 // Three destinations:
 //
-//   counters   0x1000_0000  MMIO counter block, answered in one cycle.  These
-//              are registers, not memory: there is no line to snoop, and a
-//              cached read would latch one value forever.  This window is not
-//              optional.
-//   cached     the scratchpad, behind the L1D -- including .tohost/.fromhost,
-//              which stay coherent through the snoop port (HostSnoop.scala)
-//   master     everything else -> TileLink -> HTIF
+//   counters   0x2000_0000  MMIO counter block, answered in one cycle.  These
+//              are registers, not memory: they are never cached, since a
+//              cached copy would go stale.
+//   cached     memory, behind the L1D -- including .tohost/.fromhost: the
+//              host reaches them over the coherent bus (HostAgent.scala)
+//   master     everything else -> TileLink (HTIF, CLINT, ...)
 
 package cs152
 

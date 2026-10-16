@@ -206,15 +206,11 @@ $(model_mk_debug): $(sim_common_files) $(EXTRA_SIM_REQS)
 #########################################################################################
 # invoke make to make verilator sim rules
 #########################################################################################
-# CS152: open-ended 2 relinks the simulator when the C++ prefetcher model
-# changes, so the extra sources have to be prerequisites of the binary.
-extra_sim_srcs = $(filter %.c %.cc %.cpp %.cxx,$(EXTRA_SIM_SOURCES))
-
-$(sim): $(model_mk) $(dramsim_lib) $(extra_sim_srcs)
+$(sim): $(model_mk) $(dramsim_lib)
 	$(require_riscv)
 	$(MAKE) VM_PARALLEL_BUILDS=1 -C $(model_dir) -f V$(TB).mk
 
-$(sim_debug): $(model_mk_debug) $(dramsim_lib) $(extra_sim_srcs)
+$(sim_debug): $(model_mk_debug) $(dramsim_lib)
 	$(require_riscv)
 	$(MAKE) VM_PARALLEL_BUILDS=1 -C $(model_dir_debug) -f V$(TB).mk
 

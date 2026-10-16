@@ -366,12 +366,12 @@ ifneq ($(LOADARCH),)
 get_loadarch_flag = +loadarch=$(subst mem.elf,loadarch,$(1))
 endif
 
-# CS152: the lab-2 configs pre-load the Sodor scratchpad with $readmemh, which
+# CS152: the CS152 Sodor configs pre-load the shared memory with $readmemh, which
 # needs preload.hex in the simulator's working directory -- the $readmemh path is
 # a literal baked in at elaboration.
 CS152_PRELOAD_SCRIPT ?= $(base_dir)/scripts/cs152-preload.sh
 get_preload_dir = $(call get_sim_out_name,$(1)).preload
-ifneq ($(filter CS152Lab2%,$(CONFIG)),)
+ifneq ($(filter CS152%,$(CONFIG)),)
 ifneq ($(LOADMEM),)
 # cd below means every path on the command line must be absolute; $* comes from
 # BINARY, so fix it here rather than guarding each use.

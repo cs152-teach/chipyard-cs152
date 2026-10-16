@@ -1,8 +1,14 @@
+//**************************************************************************
+// CS152 Lab 4 -- parameters and Config fragments
+//--------------------------------------------------------------------------
+
 package cs152
 
 import chisel3._
-import chisel3.util.{isPow2, log2Ceil}
+import chisel3.util.{isPow2, log2Ceil, log2Up, Cat}
 import org.chipsalliance.cde.config.{Field, Config}
+import freechips.rocketchip.subsystem.{InSubsystem, TilesLocated}
+import sodor.common.SodorTileAttachParams
 
 case class CS152CacheParams(
   sets: Int = 64,
@@ -10,11 +16,6 @@ case class CS152CacheParams(
   lineBytes: Int = 32,
   dramLat: Int = 20,
   hitLat: Int = 1,
-  mystery: Boolean = false,
-  prefetch: Boolean = false,
-  // Not yet implemented -- present so the config surface matches the lab spec.
-  writeBack: Boolean = true,
-  writeAllocate: Boolean = true,
   replacement: String = "lru"
 ) {
   require(isPow2(sets),      s"CS152: l1d sets must be a power of 2, got $sets")
@@ -24,8 +25,6 @@ case class CS152CacheParams(
   require(ways >= 1,         s"CS152: l1d ways must be >= 1, got $ways")
   require(dramLat >= 0,      s"CS152: dramLat must be >= 0, got $dramLat")
   require(hitLat >= 1,       s"CS152: hitLat must be >= 1 (1 = same cycle), got $hitLat")
-  require(writeBack,      "CS152: write-through is not implemented yet; use writeBack = true")
-  require(writeAllocate,  "CS152: no-write-allocate is not implemented yet; use writeAllocate = true")
   require(Seq("lru", "rand").contains(replacement),
     s"CS152: replacement must be \"lru\" or \"rand\", got \"$replacement\"")
 
@@ -36,70 +35,87 @@ case class CS152CacheParams(
   def wayBits:      Int = log2Ceil(ways)
   def capacityBytes: Int = sets * ways * lineBytes
 
+  // Hardware widths: at least one bit, so a direct-mapped or one-set cache
+  // still has a (constant) field to wire.
+  def idxW:  Int = log2Up(sets)
+  def wayW:  Int = log2Up(ways)
+  def beatW: Int = log2Up(wordsPerLine)
+
+  def idxOf(a: UInt): UInt = if (indexBits == 0) 0.U(1.W) else a(offsetBits + indexBits - 1, offsetBits)
+  def lineOf(a: UInt): UInt = Cat(a(31, offsetBits), 0.U(offsetBits.W))   // the line holding a
+  /** Byte offset of word `beat` within a line. */
+  def beatOff(beat: UInt): UInt =
+    if (wordsPerLine == 1) 0.U(offsetBits.W) else Cat(beat(log2Ceil(wordsPerLine) - 1, 0), 0.U(2.W))
+
   require(tagBits > 0, s"CS152: l1d geometry leaves no tag bits (sets=$sets, lineBytes=$lineBytes)")
 
   def summary: String =
-    if (mystery)
-      "CS152 L1D: MYSTERY BUILD -- geometry, latencies and policy withheld from this log"
-    else
-      f"CS152 L1D: ${capacityBytes}%d B = $sets%d sets x $ways%d ways x $lineBytes%d B/line " +
-      f"(tag=$tagBits%d index=$indexBits%d offset=$offsetBits%d, repl=$replacement, " +
-      f"hit_lat=$hitLat%d dram_lat=$dramLat%d" +
-      (if (prefetch) ", prefetch enabled)" else ")")
+    f"CS152 L1D: ${capacityBytes}%d B = $sets%d sets x $ways%d ways x $lineBytes%d B/line " +
+    f"(tag=$tagBits%d index=$indexBits%d offset=$offsetBits%d, repl=$replacement, " +
+    f"hit_lat=$hitLat%d dram_lat=$dramLat%d)"
 }
 
-/* Per-line coherence state. */
-object L1State {
-  val width = 2
-  def I = 0.U(width.W)   // invalid
-  def S = 1.U(width.W)   // valid, read-only, possibly shared
-  def M = 2.U(width.W)   // valid, read/write, exclusive
+// CoherenceProtocol, L1State and BusCmd live in CoherencePolicy.scala.
 
-  def isValid(s: UInt):  Bool = s =/= I
-  def canRead(s: UInt):  Bool = s =/= I
-  def canWrite(s: UInt): Bool = s === M
+case class CS152SystemParams(
+  nCores: Int = 1,
+  protocol: CoherenceProtocol.Value = CoherenceProtocol.MSI
+) {
+  // lab/runtime/crt.S gives each core a 128 KiB stack above the program, and
+  // syscalls.c sizes its per-core arrays by CS152_MAX_CORES (4).
+  require(nCores >= 1 && nCores <= 4, s"CS152: nCores must be 1..4, got $nCores")
 }
 
 case object CS152CacheKey extends Field[CS152CacheParams](CS152CacheParams())
+case object CS152SystemKey extends Field[CS152SystemParams](CS152SystemParams())
 
-/* Base of the counter MMIO window.
-   NOT 0x1000_0000: spike parks a byte-only ns16550 UART there, so a 32-bit
-   counter read under spike raises a load access fault and the program traps.
-   0x2000_0000 is free both here and in spike, which keeps spike usable as a
-   functional golden reference:
-     spike --isa=rv32i_zicsr -m0x20000000:0x1000,0x80000000:0x40000 prog.riscv
+/* Base of the counter MMIO window.  Every core sees its OWN counters here.
+   Must be free in spike's memory map too (0x1000_0000 is spike's byte-only
+   UART, which faults on 32-bit loads).
    CS152_CTR_BASE in lab/runtime/cs152_counters.h must match this. */
 case object CS152CounterBase extends Field[BigInt](0x20000000L)
 
-/* Path to a hex image to pre-load into the Sodor scratchpad with $readmemh,
-   or None for the normal fesvr/TSI load.
- */
+/* Path to a hex image to pre-load into the shared memory with $readmemh,
+   or None for the normal fesvr/TSI load. */
 case object CS152PreloadHex extends Field[Option[String]](None)
 
-/* Opt in to the pre-load.  Kept off the student-facing configs so their builds
-   stay bit-identical; see CS152Lab2ConfigPreload. */
 class WithScratchpadPreload(file: String = "preload.hex") extends Config((site, here, up) => {
   case CS152PreloadHex => Some(file)
 })
 
-/* The fragment students edit.
-   writeBack and writeAllocate are deliberately NOT exposed here: only one of
-   the four combinations is implemented, so offering them would only let a
-   student pick a combination that fails during elaboration.  They remain in
-   CS152CacheParams for whenever the other policies get written. */
+/* L1D geometry and latencies -- the same for every core. */
 class WithL1D(
   sets: Int = 64,
   ways: Int = 2,
   lineBytes: Int = 32,
   dramLat: Int = 20,
   hitLat: Int = 1,
-  replacement: String = "lru",
-  mystery: Boolean = false,
-  prefetch: Boolean = false
+  replacement: String = "lru"
 ) extends Config((site, here, up) => {
   case CS152CacheKey =>
-    CS152CacheParams(sets, ways, lineBytes, dramLat, hitLat, mystery = mystery,
-                     prefetch = prefetch,
-                     writeBack = true, writeAllocate = true,
-                     replacement = replacement)
+    CS152CacheParams(sets, ways, lineBytes, dramLat, hitLat, replacement)
+})
+
+/* Size of the memory at 0x8000_0000.  WithNSodorCores sizes the tile's
+   scratchpad -- the address range the core decodes as memory -- at 4096 sets x
+   64 B = 256 KiB, too small for four 128 KiB stacks; this resizes it.  Must
+   match spike's -m0x80000000:0x200000 and DEPTH in scripts/cs152-preload.sh. */
+class WithCS152MemoryBytes(bytes: Int = 1 << 21) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site).map {
+    case t: SodorTileAttachParams =>
+      val sp = t.tileParams.scratchpad
+      require(bytes % sp.blockBytes == 0, s"CS152: memory size $bytes is not a multiple of ${sp.blockBytes} B")
+      t.copy(tileParams = t.tileParams.copy(scratchpad = sp.copy(nSets = bytes / sp.blockBytes)))
+    case t => t
+  }
+})
+
+/* Number of Sodor cores sharing memory through the coherent bus. */
+class WithNCS152Cores(n: Int) extends Config((site, here, up) => {
+  case CS152SystemKey => up(CS152SystemKey, site).copy(nCores = n)
+})
+
+/* Coherence protocol for every L1D (MI, MSI, or MESI). */
+class WithCoherence(protocol: CoherenceProtocol.Value) extends Config((site, here, up) => {
+  case CS152SystemKey => up(CS152SystemKey, site).copy(protocol = protocol)
 })

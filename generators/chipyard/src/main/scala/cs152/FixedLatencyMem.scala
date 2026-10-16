@@ -1,12 +1,15 @@
+//**************************************************************************
+// CS152 Lab 4 -- fixed-latency DRAM model between the bus and shared memory
+//--------------------------------------------------------------------------
+
 package cs152
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.util.PlusArg
 import sodor.common.{MemPortIo, SodorCoreParams}
 
 /** One word of DRAM traffic.  `burst` marks a continuation of an already-open
-  * burst, which costs one cycle instead of the full dram_lat. */
+  * burst, which is answered in the same cycle instead of after dram_lat. */
 class DramReq extends Bundle {
   val addr  = UInt(32.W)
   val data  = UInt(32.W)
@@ -24,11 +27,10 @@ class DramPortIo extends Bundle {
 class FixedLatencyMem(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) extends Module {
   val io = IO(new Bundle {
     val cache = Flipped(new DramPortIo)
-    val mem   = new MemPortIo(data_width = 32)   // to scratchpad D-port
-    val kill  = if (cfg.prefetch) Some(Input(Bool())) else None
+    val mem   = new MemPortIo(data_width = 32)   // to the shared memory's D-port
   })
 
-  // Default comes from the Scala config, so the plain make flow needs no flags.
+  // Latency of the first word of a burst: CS152CacheParams.dramLat (WithL1D).
   val dramLat = cfg.dramLat.U(16.W)
 
   val sIdle :: sWait :: Nil = Enum(2)
@@ -43,7 +45,7 @@ class FixedLatencyMem(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) ext
   val inReq   = io.cache.req.bits
 
   // A burst continuation is delivered the same cycle it is asked for, so the
-  // cache's beat counter paces the burst at exactly one word per cycle.
+  // bus's beat counter paces the burst at exactly one word per cycle.
   val beatLat = Mux(inReq.burst, 0.U, dramLat)
 
   val accept  = inValid && idle
@@ -58,12 +60,7 @@ class FixedLatencyMem(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) ext
     when (count === 0.U) { state := sIdle }
       .otherwise         { count := count - 1.U }
   }
-  // One name for it, rather than three spellings of io.kill below.
-  val kill = io.kill.getOrElse(false.B)
-  // After the countdown update, so a kill in the same cycle wins.
-  when (kill) { state := sIdle }
-
-  // The cycle we actually touch the storage array.
+  // The cycle the storage array is accessed.
   val doAccess = zeroLat || (state === sWait && count === 0.U)
   val accReq   = Mux(zeroLat, inReq, held)
 
@@ -73,16 +70,7 @@ class FixedLatencyMem(cfg: CS152CacheParams)(implicit conf: SodorCoreParams) ext
   io.mem.req.bits.fcn  := accReq.fcn
   io.mem.req.bits.typ  := accReq.typ
 
-  // The scratchpad is combinational: data is available the cycle we ask.
-  io.cache.resp.valid := doAccess && !kill
+  // The shared memory is combinational: read data is available the same cycle.
+  io.cache.resp.valid := doAccess
   io.cache.resp.bits  := io.mem.resp.bits.data
-
-  if (cfg.prefetch) {
-    val lastAddr = Reg(UInt(32.W))
-    val haveLast = RegInit(false.B)
-    when (doAccess) { lastAddr := accReq.addr; haveLast := true.B }
-    when (kill) { haveLast := false.B }
-    assert(!(accept && inReq.burst && haveLast && inReq.addr =/= lastAddr + 4.U),
-      "CS152 FixedLatencyMem: burst continuation does not follow the previous beat")
-  }
 }

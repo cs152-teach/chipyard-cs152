@@ -1,14 +1,27 @@
 //**************************************************************************
-// CS152 Lab 2 — counter block (MMIO)
+// CS152 Lab 4 -- per-core counter block (MMIO)
 //--------------------------------------------------------------------------
-//   0x00 cycles   0x04 loads   0x08 stores   0x0c hits
-//   0x10 misses   0x14 writebacks            0x18 instret (not implemented, 0)
-//   0x1c control  -- write-only, see below
-//   0x20 snoop accesses         0x24 snoop hits
-//   0x28 magic    -- 0xC5152001; lets software confirm it is talking to this
-//                    block at all, so a base-address mismatch between
-//                    cs152_counters.h and CS152CounterBase is diagnosed
-//                    instead of silently reading nothing
+// Every core has its own block, at the same address: a core reads its own
+// L1D's counters, the way it would read its own CSRs.
+//
+//   0x00 cycles        0x04 loads          0x08 stores
+//   0x0c hits          0x10 misses         0x14 writebacks
+//   0x18 upgrades      0x1c control        -- write-only (reads 0), see below
+//   0x20 invalidations 0x24 interventions  0x28 magic (0xC5152004)
+//   0x2c ncores        0x30 bus-wait cycles
+//   0x34 load misses   0x38 store misses
+//
+//   hits           accesses that completed without the bus
+//   misses         GetS + GetM this cache issued
+//   load misses    the misses a load caused -- under MI a load miss is a GetM
+//   store misses   the misses a store caused   (load + store misses = misses)
+//   upgrades       Upg: a store to a line this cache held in S
+//   writebacks     dirty lines this cache wrote back (eviction or flush)
+//   invalidations  valid lines a remote request took away from this cache
+//   interventions  dirty lines this cache had to supply to a remote request
+//   bus-wait       cycles this cache wanted the bus while another held it
+//
+//   ncores is a constant, readable before anything is set up; crt.S uses it.
 //
 //   control (0x1c) write bits:
 //     bit 0   zero every counter AND resume counting  (starts a region)
@@ -28,12 +41,10 @@ import sodor.common.Constants._
 object CacheCounters {
   /* Also defined as CS152_CTR_MAGIC_VALUE in lab/runtime/cs152_counters.h.
      Change both together. */
-  val magic = "hC5152001"
-  /* A mystery build (open-ended 1) reports cycles only.*/
-  val mysteryMagic = "hC5152002"
+  val magic = "hC5152004"
 }
 
-class CacheCounters(mystery: Boolean = false)(implicit conf: SodorCoreParams) extends Module {
+class CacheCounters(nCores: Int)(implicit conf: SodorCoreParams) extends Module {
   val io = IO(new Bundle {
     val port  = Flipped(new MemPortIo(data_width = conf.xprlen))
     val stats = Input(new L1DStats)
@@ -41,46 +52,40 @@ class CacheCounters(mystery: Boolean = false)(implicit conf: SodorCoreParams) ex
     val clean = Output(Bool())
   })
 
-  val cycles     = RegInit(0.U(32.W))
-  val loads      = RegInit(0.U(32.W))
-  val stores     = RegInit(0.U(32.W))
-  val hits       = RegInit(0.U(32.W))
-  val misses     = RegInit(0.U(32.W))
-  val writebacks = RegInit(0.U(32.W))
-  val snoopAcc   = RegInit(0.U(32.W))
-  val snoopHits  = RegInit(0.U(32.W))
-  val enabled    = RegInit(true.B)
+  val enabled = RegInit(true.B)
+
+  // (offset/4, event), per the register map above
+  val events = Seq(
+     1 -> io.stats.load,
+     2 -> io.stats.store,
+     3 -> io.stats.hit,
+     4 -> io.stats.miss,
+     5 -> io.stats.writeback,
+     6 -> io.stats.upgrade,
+     8 -> io.stats.inval,
+     9 -> io.stats.intervention,
+    12 -> io.stats.busWait,
+    13 -> io.stats.loadMiss,
+    14 -> io.stats.storeMiss)
+
+  val cycles   = RegInit(0.U(32.W))
+  val counters = events.map { case (_, ev) => RegInit(0.U(32.W)) }
 
   when (enabled) {
     cycles := cycles + 1.U
-    when (io.stats.load)        { loads      := loads      + 1.U }
-    when (io.stats.store)       { stores     := stores     + 1.U }
-    when (io.stats.hit)         { hits       := hits       + 1.U }
-    when (io.stats.miss)        { misses     := misses     + 1.U }
-    when (io.stats.writeback)   { writebacks := writebacks + 1.U }
-    when (io.stats.snoopAccess) { snoopAcc   := snoopAcc   + 1.U }
-    when (io.stats.snoopHit)    { snoopHits  := snoopHits  + 1.U }
+    for (((_, ev), c) <- events zip counters) {
+      when (ev) { c := c + 1.U }
+    }
   }
-
-  /* Mysterious build: only expose cycles counter */
-  def vis(r: UInt): UInt = if (mystery) 0.U(32.W) else r
 
   val sel = io.port.req.bits.addr(5, 2)
   io.port.req.ready      := true.B
   io.port.resp.valid     := io.port.req.valid
-  io.port.resp.bits.data := MuxLookup(sel, 0.U)(Seq(
-     0.U -> cycles,
-     1.U -> vis(loads),
-     2.U -> vis(stores),
-     3.U -> vis(hits),
-     4.U -> vis(misses),
-     5.U -> vis(writebacks),
-     6.U -> 0.U,              // instret: would need a core-side retire pulse
-     8.U -> vis(snoopAcc),
-     9.U -> vis(snoopHits),
-    10.U -> (if (mystery) CacheCounters.mysteryMagic.U(32.W)
-             else          CacheCounters.magic.U(32.W))
-  ))
+  io.port.resp.bits.data := MuxLookup(sel, 0.U)(
+    Seq(0.U -> cycles) ++
+    (events zip counters).map { case ((off, _), c) => off.U -> c } ++
+    Seq(10.U -> CacheCounters.magic.U(32.W),
+        11.U -> nCores.U(32.W)))
 
   val ctrlWrite = io.port.req.valid && io.port.req.bits.fcn === M_XWR && sel === 7.U
 
@@ -88,16 +93,14 @@ class CacheCounters(mystery: Boolean = false)(implicit conf: SodorCoreParams) ex
   when (ctrlWrite && io.port.req.bits.data(3)) { enabled := false.B }
 
   when (ctrlWrite && io.port.req.bits.data(0)) {
-    cycles := 0.U; loads := 0.U; stores := 0.U
-    hits := 0.U; misses := 0.U; writebacks := 0.U
-    snoopAcc := 0.U; snoopHits := 0.U
+    cycles := 0.U
+    counters.foreach(_ := 0.U)
     enabled := true.B
   }
 
-  // NOTE (known issue): zeroing is combinational at the write cycle, but a
-  // flush walk runs for many cycles afterwards and its writebacks land in the
-  // just-zeroed counter.  Issue FLUSH, wait for it, then ZERO -- as setStats()
-  // does -- rather than setting both bits in one write.
+  // A flush walk runs for many cycles after the write that starts it, so its
+  // writebacks would be counted after a zero in the same write.  Software
+  // flushes first, then zeroes (setStats() in lab/runtime/syscalls.c).
   io.flush := ctrlWrite && io.port.req.bits.data(1)
   io.clean := ctrlWrite && io.port.req.bits.data(2)
 }
