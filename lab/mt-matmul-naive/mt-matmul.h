@@ -2,6 +2,7 @@
 #define _MT_MATMUL_H
 
 #include <stddef.h>
+#include "util.h"
 
 //--------------------------------------------------------------------------
 // Input/Reference Data

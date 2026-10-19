@@ -2,6 +2,7 @@
 #define _MT_VVADD_H
 
 #include <stddef.h>
+#include "util.h"
 
 //--------------------------------------------------------------------------
 // Input/Reference Data
